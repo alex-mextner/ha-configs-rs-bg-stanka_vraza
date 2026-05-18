@@ -13,6 +13,8 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
 }
 
+DATAPLICITY_URL="${DATAPLICITY_URL:-https://spry-gazelle-4693.dataplicity.io/}"
+
 check_ha() {
     local url="${HA_URL:-http://localhost:8123}"
     local response=$(curl -s --connect-timeout 5 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo "000")
@@ -23,6 +25,46 @@ check_ha() {
         log "✗ HA is NOT accessible (HTTP $response)"
         return 1
     fi
+}
+
+check_dataplicity() {
+    local body=$(curl -s --connect-timeout 10 -m 15 "$DATAPLICITY_URL" 2>/dev/null || echo "")
+    if [ -z "$body" ]; then
+        log "✗ Dataplicity tunnel did not respond (empty body)"
+        return 1
+    fi
+    if echo "$body" | grep -qi "device offline"; then
+        log "✗ Dataplicity tunnel reports 'Device offline'"
+        return 1
+    fi
+    if echo "$body" | grep -qi "wormhole"; then
+        log "✗ Dataplicity tunnel shows wormhole page (not proxying to HA)"
+        return 1
+    fi
+    if ! echo "$body" | grep -qi "home.assistant\|home-assistant"; then
+        log "✗ Dataplicity tunnel response does not contain Home Assistant content"
+        return 1
+    fi
+    log "✓ Dataplicity tunnel is proxying to HA correctly"
+    return 0
+}
+
+fix_dataplicity() {
+    log "Attempting to fix dataplicity tunnel (will restart HA container)..."
+    restart_ha
+    local result=$?
+    if [ $result -eq 0 ]; then
+        log "Waiting 30s for dataplicity m2m to reconnect..."
+        sleep 30
+        if check_dataplicity; then
+            log "✓ Dataplicity tunnel recovered after restart"
+            return 0
+        else
+            log "✗ Dataplicity tunnel still offline after restart"
+            return 1
+        fi
+    fi
+    return 1
 }
 
 fix_orphaned() {
@@ -116,6 +158,10 @@ status_report() {
     check_ha && echo "Status: ONLINE" || echo "Status: OFFLINE"
     echo ""
 
+    echo "Dataplicity Tunnel:"
+    check_dataplicity && echo "Status: ONLINE" || echo "Status: OFFLINE"
+    echo ""
+
     echo "Orphaned Entities:"
     python3 << 'PYEOF'
 import json
@@ -171,9 +217,20 @@ PYEOF
 case "${1:-status}" in
     check)
         check_ha
+        check_dataplicity
         ;;
     fix-orphaned)
         fix_orphaned
+        ;;
+    fix-dataplicity)
+        fix_dataplicity
+        ;;
+    fix-all)
+        log "Running full fix cycle..."
+        fix_orphaned || true
+        if ! check_dataplicity; then
+            fix_dataplicity || true
+        fi
         ;;
     restart)
         restart_ha
@@ -182,7 +239,7 @@ case "${1:-status}" in
         status_report
         ;;
     *)
-        echo "Usage: $0 {check|fix-orphaned|restart|status}"
+        echo "Usage: $0 {check|fix-orphaned|fix-dataplicity|fix-all|restart|status}"
         exit 1
         ;;
 esac
