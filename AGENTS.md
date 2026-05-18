@@ -83,14 +83,19 @@ current user (no `sudo`/`run0` needed).
 
 ## Critical rules — Home Assistant config safety
 
-**NEVER** delete, modify, or overwrite `.storage/` files (like `core.config_entries`,
-`core.entity_registry`, `assist_pipeline.pipelines`, etc.) without explicit user
-consent. These files control HA integrations, entities, and pipelines.
+**NEVER** manually edit, delete, modify, or overwrite `.storage/` files (like `core.config_entries`,
+`core.entity_registry`, `assist_pipeline.pipelines`, `lovelace_dashboards`, etc.).
+These files are HA's internal runtime state and must only be modified through
+Home Assistant APIs (REST API, Websocket API, services) or configuration files
+(`configuration.yaml`, `automations.yaml`, etc.).
 
-Before any destructive operation on HA config:
-1. Always create a backup first
-2. Confirm with user before making changes
-3. Use the fail-safe scripts in `scripts/ha_fail_safe.sh` for entity registry fixes
+- Always prefer HA REST API, Websocket API, or service calls over manual file edits.
+- Use `configuration.yaml`, `automations.yaml`, `scripts.yaml`, and other config files for persistent settings.
+- If an operation requires touching `.storage/`, find the equivalent API endpoint or UI path first.
+- Before any destructive operation on HA config:
+  1. Always create a backup first
+  2. Confirm with user before making changes
+  3. Use the fail-safe scripts in `scripts/ha_fail_safe.sh` for entity registry fixes
 
 **NEVER** delete, modify, or overwrite backups (e.g., `backups/`, `config_backup_*`, `*.tar` in repo root) without explicit user consent. Backups are the safety net for recovery.
 
