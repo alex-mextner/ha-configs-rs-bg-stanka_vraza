@@ -1,29 +1,29 @@
-[submodule "custom_components/dataplicity"]
-	path = custom_components/dataplicity
+[submodule "submodules/dataplicity"]
+	path = submodules/dataplicity
 	url = https://github.com/alex-mextner/Dataplicity.git
 	branch = fix/dataplicity-modern-api
-[submodule "custom_components/home_generative_agent"]
-	path = custom_components/home_generative_agent
+[submodule "submodules/home-generative-agent"]
+	path = submodules/home-generative-agent
 	url = https://github.com/goruck/home-generative-agent.git
 	branch = main
-[submodule "custom_components/hacs"]
-	path = custom_components/hacs
+[submodule "submodules/hacs"]
+	path = submodules/hacs
 	url = https://github.com/hacs/integration.git
-[submodule "custom_components/mcp_server_http_transport"]
-	path = custom_components/mcp_server_http_transport
+[submodule "submodules/hass-mcp-server"]
+	path = submodules/hass-mcp-server
 	url = https://github.com/ganhammar/hass-mcp-server.git
-[submodule "custom_components/wifi_sensor_tracker"]
-	path = custom_components/wifi_sensor_tracker
+[submodule "submodules/HA-WiFi-Sensor-Tracker"]
+	path = submodules/HA-WiFi-Sensor-Tracker
 	url = https://github.com/5a2v0/HA-WiFi-Sensor-Tracker.git
-[submodule "custom_components/xtend_tuya"]
-	path = custom_components/xtend_tuya
+[submodule "submodules/xtend_tuya"]
+	path = submodules/xtend_tuya
 	url = https://github.com/azerty9971/xtend_tuya.git
-[submodule "custom_components/yandex_dialogs"]
-	path = custom_components/yandex_dialogs
+[submodule "submodules/YandexDialogs"]
+	path = submodules/YandexDialogs
 	url = https://github.com/AlexxIT/YandexDialogs.git
-[submodule "custom_components/yandex_smart_home"]
-	path = custom_components/yandex_smart_home
+[submodule "submodules/yandex_smart_home"]
+	path = submodules/yandex_smart_home
 	url = https://github.com/dext0r/yandex_smart_home.git
-[submodule "custom_components/yandex_station"]
-	path = custom_components/yandex_station
+[submodule "submodules/YandexStation"]
+	path = submodules/YandexStation
 	url = https://github.com/AlexxIT/YandexStation.git
