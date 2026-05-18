@@ -157,6 +157,7 @@ An attempt to "clean up git history" caused a cascading failure:
 ### Rules enforced from now on
 - **NEVER run `git clean` in this repo.** It unconditionally destroys runtime files.
 - **NEVER run `git checkout --orphan`, `git rebase`, `git reset --hard`, or any destructive history rewrite on `main`.** If orphan history is truly needed, create a new branch and keep `main` intact.
+- **NEVER delete backups.** Ever. Even if they seem old or redundant. Disk space is cheap; lost configuration is expensive. This includes `backups/`, `*.tar`, `.storage.backup*`, `/tmp/ha-backup-*`, `/tmp/pre_bm/`, and any other backup artifacts.
 - **Before any destructive operation:** `cp -r /home/ultra/homeassistant /tmp/ha-backup-$(date +%Y%m%d_%H%M%S)`.
 - **When restoring from backup, do not blindly overwrite files.** Always preserve changes made after the backup was taken. Use `git diff`, `tar --diff`, or manual review to merge new work with the restored state.
 - **For root-owned files** (e.g. Docker-created `.pyc` or `.storage` entries), use `docker run --rm -v <path>:/target alpine sh -c "rm -rf /target/<file>"` instead of `sudo`.
