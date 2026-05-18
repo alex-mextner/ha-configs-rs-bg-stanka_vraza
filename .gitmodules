@@ -1,0 +1,29 @@
+[submodule "custom_components/dataplicity"]
+	path = custom_components/dataplicity
+	url = https://github.com/alex-mextner/Dataplicity.git
+	branch = fix/dataplicity-modern-api
+[submodule "custom_components/home_generative_agent"]
+	path = custom_components/home_generative_agent
+	url = https://github.com/goruck/home-generative-agent.git
+	branch = main
+[submodule "custom_components/hacs"]
+	path = custom_components/hacs
+	url = https://github.com/hacs/integration.git
+[submodule "custom_components/mcp_server_http_transport"]
+	path = custom_components/mcp_server_http_transport
+	url = https://github.com/ganhammar/hass-mcp-server.git
+[submodule "custom_components/wifi_sensor_tracker"]
+	path = custom_components/wifi_sensor_tracker
+	url = https://github.com/5a2v0/HA-WiFi-Sensor-Tracker.git
+[submodule "custom_components/xtend_tuya"]
+	path = custom_components/xtend_tuya
+	url = https://github.com/azerty9971/xtend_tuya.git
+[submodule "custom_components/yandex_dialogs"]
+	path = custom_components/yandex_dialogs
+	url = https://github.com/AlexxIT/YandexDialogs.git
+[submodule "custom_components/yandex_smart_home"]
+	path = custom_components/yandex_smart_home
+	url = https://github.com/dext0r/yandex_smart_home.git
+[submodule "custom_components/yandex_station"]
+	path = custom_components/yandex_station
+	url = https://github.com/AlexxIT/YandexStation.git

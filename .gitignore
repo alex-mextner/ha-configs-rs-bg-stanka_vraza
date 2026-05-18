@@ -37,11 +37,6 @@ zigbee.db-wal
 .ha_run.lock
 .HA_VERSION
 
-# Third-party custom components
-custom_components/*
-!custom_components/dataplicity/
-!custom_components/home_generative_agent/
-
 # Secrets and credentials
 secrets.yaml
 .env
