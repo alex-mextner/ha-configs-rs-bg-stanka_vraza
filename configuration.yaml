@@ -12,6 +12,15 @@ http:
 frontend:
   themes: !include_dir_merge_named themes
 
+panel_custom:
+  - name: esphome
+    sidebar_title: ESPHome
+    sidebar_icon: mdi:chip
+    url_path: esphome
+    module_url: /local/panels/esphome.js
+    embed_iframe: true
+    trust_external_script: false
+
 template: !include templates.yaml
 
 automation: !include automations.yaml
