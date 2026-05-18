@@ -152,6 +152,12 @@ current user (no `sudo`/`run0` needed).
 
 **Reload automations/config:** `docker restart homeassistant-homeassistant-1`
 
+**Dataplicity tunnel note:**
+After `docker restart homeassistant-homeassistant-1`, the dataplicity m2m tunnel may briefly show a
+"Dataplicity Port Forwarding" page instead of HA while the agent reconnects. This is normal
+and resolves automatically within ~30–60 seconds once the HA container is `healthy`.
+If it persists, run `./scripts/ha_fail_safe.sh fix-dataplicity` (or simply restart HA again).
+
 **Access HA API:**
 - Token stored in `~/.env` as `HA_TOKEN`
 - Base URL: `http://localhost:8123/api`
@@ -170,9 +176,17 @@ current user (no `sudo`/`run0` needed).
 
 **NEVER** manually edit, delete, modify, or overwrite `.storage/` files (like `core.config_entries`,
 `core.entity_registry`, `assist_pipeline.pipelines`, `lovelace_dashboards`, etc.).
-These files are HA's internal runtime state and must only be modified through
-Home Assistant APIs (REST API, Websocket API, services) or configuration files
-(`configuration.yaml`, `automations.yaml`, etc.).
+**NEVER** delete or modify runtime databases (e.g. `home-assistant_v2.db`, `auth.db`, `library.db`,
+`*.db` files in `/home/ultra/music-assistant/`, `/home/ultra/homeassistant/`).
+These files are HA's and services' internal runtime state and must only be modified through
+Home Assistant APIs (REST API, Websocket API, services) or the service's own UI.
+
+### Why runtime databases must not be touched
+- `.db` files contain encrypted tokens, auth sessions, device pairings, and entity mappings.
+- Deleting them (e.g. `auth.db`) breaks integrations that rely on stored tokens (e.g. `music_assistant`
+  loses its HA auth token and cannot reconnect).
+- SQLite WAL/shm files must stay paired with their main DB; deleting one corrupts the database.
+- If a DB needs repair, use the service's own tools or HA APIs — never `rm` the file directly.
 
 - Always prefer HA REST API, Websocket API, or service calls over manual file edits.
 - Use `configuration.yaml`, `automations.yaml`, `scripts.yaml`, and other config files for persistent settings.
