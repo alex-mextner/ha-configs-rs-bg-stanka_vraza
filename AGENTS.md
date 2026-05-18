@@ -188,6 +188,36 @@ If something breaks — restore from backup immediately.
 
 **When restoring from backup, do not blindly overwrite files.** Always preserve changes made after the backup was taken. Use `git diff`, `tar --diff`, or manual review to merge new work with the restored state.
 
+## Backup restoration safety
+
+**You cannot simply restore from backup and call it done.** A backup is a snapshot in time; the live system may contain newer work that the backup does not have. Blind restoration will silently destroy that newer work.
+
+### Pre-restore checklist (MUST do)
+1. **Identify the backup date** — know exactly what point in time it represents.
+2. **List all changes made since that date** — check `git log --since="<backup-date>"`, `git status`, and `git diff`.
+3. **Compare backup vs current** — run `tar --diff -f backup.tar.gz` against the live tree to find files that exist now but not in the backup.
+4. **Classify files**:
+   - **Tracked in git** — restore from backup, then re-apply newer commits via cherry-pick or manual merge.
+   - **Untracked configs** (`packages/`, `blueprints/`, `themes/`, `scripts/`, `automations.yaml`, etc.) — these may have been added after the backup. Do not overwrite them.
+   - **Runtime state** (`.storage/`, `*.db`, logs) — safe to restore, but still back up current state first.
+5. **Back up the current broken state BEFORE restoring** — even if it's broken, it may contain the only copy of recent work.
+
+### Post-restore verification (MUST do)
+1. `git status` — ensure no tracked files are missing or modified unexpectedly.
+2. `git ls-files | xargs ls` — confirm all tracked files exist.
+3. `ls packages/ blueprints/ themes/ 2>/dev/null` — confirm untracked config directories are intact.
+4. `docker restart homeassistant-homeassistant-1` — restart HA and check for startup errors.
+5. Check critical entities in `.storage/core.entity_registry` — ensure nothing was orphaned or lost.
+
+### Example: what went wrong in 2026-05-18
+The backup from `ha-config-20260518_030001.tar.gz` (03:00) was used to restore after a destructive git operation at ~17:00. The restore overwrote the working tree, which destroyed:
+- `packages/kitchen_light_white_only.yaml` (added after 03:00)
+- `packages/universal_remote.yaml` (added after 03:00)
+- `submodules/hass-ingress-fork` and `custom_components/ingress` symlink (set up after 03:00)
+- `ha.docker-compose.yaml` changes (made after 03:00)
+
+These files were lost because they were not in the backup and the restore was done blindly without a diff/merge step. They were only recovered later by manual inspection and re-creation.
+
 ## Lessons learned — critical incident 2026-05-18
 
 ### What broke
