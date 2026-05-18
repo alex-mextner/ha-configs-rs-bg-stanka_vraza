@@ -138,6 +138,29 @@ If something breaks — restore from backup immediately.
 
 **When restoring from backup, do not blindly overwrite files.** Always preserve changes made after the backup was taken. Use `git diff`, `tar --diff`, or manual review to merge new work with the restored state.
 
+## Lessons learned — critical incident 2026-05-18
+
+### What broke
+An attempt to "clean up git history" caused a cascading failure:
+1. `git clean -fdx` deleted HA runtime files (`.storage/`, `home-assistant_v2.db`, `automations.yaml`, `scripts.yaml`, `scenes.yaml`, `.cloud/`, `.cache/`, `.HA_VERSION`, logs, Zigbee DB).
+2. `git checkout --orphan main` erased 23 commits of HA config history.
+3. Submodules were placed directly in `custom_components/<domain>/` — but upstream repos nest the actual integration code inside `custom_components/<domain>/custom_components/<domain>/`, so all integrations silently failed to load.
+4. HACS broke because `hacs_frontend` (pip package) was missing from the submodule.
+5. Dataplicity credentials were overwritten with old values from an older backup.
+
+### Recovery
+- Restored `.storage/`, DB, configs from `ha-config-20260518_030001.tar.gz` (cron backup).
+- Replaced dataplicity credentials from `/tmp/pre_bm/.storage/core.config_entries`.
+- Moved submodules to `submodules/` with symlinks into `custom_components/`.
+- Copied `hacs_frontend` pip package into the HACS submodule and committed inside it.
+
+### Rules enforced from now on
+- **NEVER run `git clean` in this repo.** It unconditionally destroys runtime files.
+- **NEVER run `git checkout --orphan`, `git rebase`, `git reset --hard`, or any destructive history rewrite on `main`.** If orphan history is truly needed, create a new branch and keep `main` intact.
+- **Before any destructive operation:** `cp -r /home/ultra/homeassistant /tmp/ha-backup-$(date +%Y%m%d_%H%M%S)`.
+- **When restoring from backup, do not blindly overwrite files.** Always preserve changes made after the backup was taken. Use `git diff`, `tar --diff`, or manual review to merge new work with the restored state.
+- **For root-owned files** (e.g. Docker-created `.pyc` or `.storage` entries), use `docker run --rm -v <path>:/target alpine sh -c "rm -rf /target/<file>"` instead of `sudo`.
+
 ## Git workflow
 
 **Commit messages must be atomic** — one commit per logical change.
