@@ -92,6 +92,8 @@ Before any destructive operation on HA config:
 2. Confirm with user before making changes
 3. Use the fail-safe scripts in `scripts/ha_fail_safe.sh` for entity registry fixes
 
+**NEVER** delete, modify, or overwrite backups (e.g., `backups/`, `config_backup_*`, `*.tar` in repo root) without explicit user consent. Backups are the safety net for recovery.
+
 If something breaks — restore from backup immediately.
 
 ## Git workflow
