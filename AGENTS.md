@@ -101,6 +101,8 @@ Home Assistant APIs (REST API, Websocket API, services) or configuration files
 
 If something breaks — restore from backup immediately.
 
+**When restoring from backup, do not blindly overwrite files.** Always preserve changes made after the backup was taken. Use `git diff`, `tar --diff`, or manual review to merge new work with the restored state.
+
 ## Git workflow
 
 **Commit messages must be atomic** — one commit per logical change.
