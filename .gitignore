@@ -17,6 +17,23 @@ coverage.xml
 visualize_graph.py
 
 
-# Home Assistant configuration
-config/*
-#!config/configuration.yaml
+# Home Assistant runtime data
+.storage/
+.cloud/
+.cache/
+.deps/
+.tts/
+.image/
+backups/
+*.log
+*.log.*
+home-assistant_v2.db*
+zigbee.db*
+zigbee.db-shm
+zigbee.db-wal
+.ha_run.lock
+.HA_VERSION
+
+# Secrets and credentials
+secrets.yaml
+.env
