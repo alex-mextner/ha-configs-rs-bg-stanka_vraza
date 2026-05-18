@@ -37,12 +37,6 @@ zigbee.db-wal
 .ha_run.lock
 .HA_VERSION
 
-# HA editable config files (managed via UI, not git)
-automations.yaml
-scripts.yaml
-scenes.yaml
-secrets.yaml
-
 # Secrets and credentials
 secrets.yaml
 .env
