@@ -58,22 +58,24 @@ Runtime dependencies are sourced from
 
 ## custom_components/ management
 
-All third-party integrations under `custom_components/` are managed as **Git submodules**
-(pinned to specific tags or branches) so they stay clean, trackable, and updatable.
+All third-party integrations are managed as **Git submodules** cloned into `submodules/`,
+with **symlinks** from `custom_components/<domain>/` pointing to
+`submodules/<repo>/custom_components/<domain>/`. This keeps the repo clean while
+allowing HA to load integrations normally.
 
 ### Current submodules
 
-| Path | Repository | Pin |
-|---|---|---|
-| `custom_components/dataplicity` | `alex-mextner/Dataplicity` | branch `fix/dataplicity-modern-api` (patched fork) |
-| `custom_components/hacs` | `hacs/integration` | tag `2.0.5` |
-| `custom_components/home_generative_agent` | `goruck/home-generative-agent` | branch `main` |
-| `custom_components/mcp_server_http_transport` | `ganhammar/hass-mcp-server` | tag `v1.8.0` |
-| `custom_components/wifi_sensor_tracker` | `5a2v0/HA-WiFi-Sensor-Tracker` | tag `2.2.5` |
-| `custom_components/xtend_tuya` | `azerty9971/xtend_tuya` | tag `v4.4.7` |
-| `custom_components/yandex_dialogs` | `AlexxIT/YandexDialogs` | tag `v1.3.2` |
-| `custom_components/yandex_smart_home` | `dext0r/yandex_smart_home` | tag `v1.1.2` |
-| `custom_components/yandex_station` | `AlexxIT/YandexStation` | tag `v3.21.0` |
+| Submodule | Symlink | Repository | Pin |
+|---|---|---|---|
+| `submodules/dataplicity` | `custom_components/dataplicity` | `alex-mextner/Dataplicity` | branch `fix/dataplicity-modern-api` |
+| `submodules/hacs` | `custom_components/hacs` | `hacs/integration` | tag `2.0.5` |
+| `submodules/home-generative-agent` | `custom_components/home_generative_agent` | `goruck/home-generative-agent` | branch `main` |
+| `submodules/hass-mcp-server` | `custom_components/mcp_server_http_transport` | `ganhammar/hass-mcp-server` | tag `v1.8.0` |
+| `submodules/HA-WiFi-Sensor-Tracker` | `custom_components/wifi_sensor_tracker` | `5a2v0/HA-WiFi-Sensor-Tracker` | tag `2.2.5` |
+| `submodules/xtend_tuya` | `custom_components/xtend_tuya` | `azerty9971/xtend_tuya` | tag `v4.4.7` |
+| `submodules/YandexDialogs` | `custom_components/yandex_dialogs` | `AlexxIT/YandexDialogs` | tag `v1.3.2` |
+| `submodules/yandex_smart_home` | `custom_components/yandex_smart_home` | `dext0r/yandex_smart_home` | tag `v1.1.2` |
+| `submodules/YandexStation` | `custom_components/yandex_station` | `AlexxIT/YandexStation` | tag `v3.21.0` |
 
 ### Rules
 - **Do not copy third-party code directly** into this repo. Always add it as a submodule.
@@ -81,8 +83,11 @@ All third-party integrations under `custom_components/` are managed as **Git sub
   Never replace it with vanilla upstream without checking the patch delta.
 - `home_generative_agent` is tracked on upstream `goruck/home-generative-agent`.
   If local patches are needed, either fork upstream or patch here and push to the fork.
-- To update a submodule to a newer tag/branch: `cd <path> && git fetch --tags && git checkout <new-tag>`.
-  Then commit the submodule pointer change in the parent repo.
+- **HACS special case:** upstream `.gitignore` excludes `hacs_frontend`. After cloning,
+  copy the `hacs_frontend` pip package into `submodules/hacs/custom_components/hacs/hacs_frontend/`
+  and commit inside the submodule so HA can import it.
+- To update a submodule: `cd submodules/<repo> && git fetch --tags && git checkout <new-tag>`.
+  Then commit the submodule pointer change and symlink in the parent repo.
 - When cloning this repo on a new machine, use `git clone --recurse-submodules` or run
   `git submodule update --init --recursive` afterwards.
 
