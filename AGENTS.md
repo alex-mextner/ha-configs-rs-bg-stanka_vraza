@@ -60,3 +60,49 @@ Runtime dependencies are sourced from
 - The integration is a Home Assistant service integration (`manifest.json`).
 - Prefer the Makefile workflow for setup/tasks (`make devdeps`, `make testdeps`,
   `make runtimedeps`) over legacy helper scripts.
+
+## Home Assistant Docker management
+HA runs in Docker under `homeassistant-homeassistant-1`. All docker commands run as
+current user (no `sudo`/`run0` needed).
+
+**Reload automations/config:** `docker restart homeassistant-homeassistant-1`
+
+**Access HA API:**
+- Token stored in `~/.env` as `HA_TOKEN`
+- Base URL: `http://localhost:8123/api`
+- Use: `curl -H "Authorization: Bearer $HA_TOKEN" ...`
+
+**Other useful commands:**
+- `docker exec -it homeassistant-homeassistant-1 bash` — shell inside container
+- `docker logs -f homeassistant-homeassistant-1` — view logs
+- `docker ps` — list all containers
+
+**Tip:** `touch ~/.env` (if needed) as current user — never use sudo for dotfiles in ~.
+
+**Rule:** Prefer current user for all operations. Never use `sudo` or `run0` unless strictly required. If a file in `~` requires root access, fix its permissions instead of using elevated privileges.
+
+## Critical rules — Home Assistant config safety
+
+**NEVER** delete, modify, or overwrite `.storage/` files (like `core.config_entries`,
+`core.entity_registry`, `assist_pipeline.pipelines`, etc.) without explicit user
+consent. These files control HA integrations, entities, and pipelines.
+
+Before any destructive operation on HA config:
+1. Always create a backup first
+2. Confirm with user before making changes
+3. Use the fail-safe scripts in `scripts/ha_fail_safe.sh` for entity registry fixes
+
+If something breaks — restore from backup immediately.
+
+## Git workflow
+
+**Commit messages must be atomic** — one commit per logical change.
+- Good: "fix TTS entity orphaned state" / "add health check cron"
+- Bad: "fix multiple issues" / "updates"
+
+**Always commit atomically as you work.** Do not wait for an explicit user request to commit. After each logical change (feature, fix, or config update), create a commit immediately. This keeps the history clean and makes rollbacks safe.
+
+**NEVER commit secrets, credentials, or `.env` files.**
+**NEVER commit changes to `.storage/` files directly.**
+
+Use `git diff` to verify changes before committing.
