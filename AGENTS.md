@@ -76,6 +76,7 @@ allowing HA to load integrations normally.
 | `submodules/YandexDialogs` | `custom_components/yandex_dialogs` | `AlexxIT/YandexDialogs` | tag `v1.3.2` |
 | `submodules/yandex_smart_home` | `custom_components/yandex_smart_home` | `dext0r/yandex_smart_home` | tag `v1.1.2` |
 | `submodules/YandexStation` | `custom_components/yandex_station` | `AlexxIT/YandexStation` | tag `v3.21.0` |
+| `submodules/hass-ingress-fork` | `custom_components/ingress` | `lovelylain/hass_ingress` | local fork (patched) |
 
 ### Rules
 - **Do not copy third-party code directly** into this repo. Always add it as a submodule.
@@ -83,6 +84,9 @@ allowing HA to load integrations normally.
   Never replace it with vanilla upstream without checking the patch delta.
 - `home_generative_agent` is tracked on upstream `goruck/home-generative-agent`.
   If local patches are needed, either fork upstream or patch here and push to the fork.
+- `ingress` (`hass-ingress-fork`) is a **local patched fork** of `lovelylain/hass_ingress`.
+  Patches: removed donate button, removed header/title, added loading spinner CSS.
+  Never replace it with vanilla upstream without re-applying patches.
 - **HACS special case:** upstream `.gitignore` excludes `hacs_frontend`. After cloning,
   copy the `hacs_frontend` pip package into `submodules/hacs/custom_components/hacs/hacs_frontend/`
   and commit inside the submodule so HA can import it.
