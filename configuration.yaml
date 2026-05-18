@@ -31,14 +31,14 @@ ingress:
     icon: mdi:code-braces
     url: http://code-server:8080
     work_mode: ingress
-    ui_mode: panel
+    ui_mode: normal
   esphome:
     require_admin: true
     title: ESPHome
     icon: mdi:chip
     url: http://esphome:6052
     work_mode: ingress
-    ui_mode: panel
+    ui_mode: normal
 
 automation: !include automations.yaml
 script: !include scripts.yaml
