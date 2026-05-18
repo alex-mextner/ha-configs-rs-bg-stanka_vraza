@@ -197,6 +197,7 @@ An attempt to "clean up git history" caused a cascading failure:
 3. Submodules were placed directly in `custom_components/<domain>/` — but upstream repos nest the actual integration code inside `custom_components/<domain>/custom_components/<domain>/`, so all integrations silently failed to load.
 4. HACS broke because `hacs_frontend` (pip package) was missing from the submodule.
 5. Dataplicity credentials were overwritten with old values from an older backup.
+6. **Config packages lost**: `packages/kitchen_light_white_only.yaml` and `packages/universal_remote.yaml` disappeared from git history because the orphan branch rewrite dropped commits that added them. They were only restored from the cron backup `ha-config-20260518_030001.tar.gz`.
 
 ### Recovery
 - Restored `.storage/`, DB, configs from `ha-config-20260518_030001.tar.gz` (cron backup).
@@ -211,6 +212,7 @@ An attempt to "clean up git history" caused a cascading failure:
 - **Before any destructive operation:** `cp -r /home/ultra/homeassistant /tmp/ha-backup-$(date +%Y%m%d_%H%M%S)`.
 - **When restoring from backup, do not blindly overwrite files.** Always preserve changes made after the backup was taken. Use `git diff`, `tar --diff`, or manual review to merge new work with the restored state.
 - **For root-owned files** (e.g. Docker-created `.pyc` or `.storage` entries), use `docker run --rm -v <path>:/target alpine sh -c "rm -rf /target/<file>"` instead of `sudo`.
+- **Always verify expected config files exist after any restore.** Use `git ls-files` to confirm tracked files, and compare against backup archives with `tar --diff` to spot missing untracked-but-important files (e.g., `packages/`, `blueprints/`, `themes/`).
 
 ## Git workflow
 
