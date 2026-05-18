@@ -1,0 +1,33 @@
+# Template light wrapper — exposes light.kukhnia as brightness-only
+# (no color picker in UI). The original light.kukhnia is hidden via
+# entity_registry (hidden_by=user).
+# Modern template syntax (2024+): `template:` block with `light:` list,
+# each light has `name`, `state`, `level` plus action lists.
+template:
+  - light:
+      - unique_id: kukhnia_white_wrapper
+        name: Кухня
+        default_entity_id: light.kukhnia_white
+        state: "{{ states('light.kukhnia') == 'on' }}"
+        level: "{{ state_attr('light.kukhnia','brightness') | int(0) }}"
+        turn_on:
+          - target:
+              entity_id:
+                - light.kukhnia
+            data:
+              color_temp_kelvin: 3000
+              brightness: "{{ brightness | default(255) }}"
+            action: light.turn_on
+        turn_off:
+          - target:
+              entity_id:
+                - light.kukhnia
+            action: light.turn_off
+        set_level:
+          - target:
+              entity_id:
+                - light.kukhnia
+            data:
+              color_temp_kelvin: 3000
+              brightness: "{{ brightness }}"
+            action: light.turn_on
