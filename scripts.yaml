@@ -1,0 +1,136 @@
+igraj_na_teleke:
+  sequence:
+  - action: media_player.select_source
+    data:
+      source: media_player.gostinaia
+    target:
+      entity_id: media_player.yandex_station_m00zrw3008rajg
+  alias: Играй на телеке
+  description: ''
+  icon: mdi:television-classic
+igraj_na_kolonke:
+  sequence:
+  - action: media_player.select_source
+    data:
+      source: ''
+    target:
+      entity_id: media_player.yandex_station_m00zrw3008rajg
+  alias: Играй на колонке
+  description: ''
+  icon: mdi:speaker-wireless
+vkliuchi_serialy:
+  alias: Включи хромкаст
+  mode: single
+  sequence:
+  - if:
+    - condition: template
+      value_template: '{{ states("input_text.tv_source") == "chromecast" }}'
+    then:
+    - stop: already on chromecast
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_source
+    data: {}
+  - delay:
+      milliseconds: 999
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_left
+    data: {}
+  - delay:
+      milliseconds: 500
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_ok
+    data: {}
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.tv_source
+    data:
+      value: chromecast
+vkliuchi_hromkast:
+  alias: Включи сериалы
+  mode: single
+  sequence:
+  - if:
+    - condition: template
+      value_template: '{{ states("input_text.tv_source") == "pc" }}'
+    then:
+    - stop: already on pc
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_source
+    data: {}
+  - delay:
+      milliseconds: 999
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_right
+    data: {}
+  - delay:
+      milliseconds: 500
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_ok
+    data: {}
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.tv_source
+    data:
+      value: pc
+tv_pause:
+  sequence:
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: input_text.tv_source
+        state:
+        - pc
+      sequence:
+      - action: media_player.media_pause
+        metadata: {}
+        target:
+          device_id: 684f74444c4499ff98d966a4775657f8
+        data: {}
+    - conditions:
+      - condition: state
+        entity_id: input_text.tv_source
+        state:
+        - chromecast
+      sequence:
+      - action: media_player.media_pause
+        metadata: {}
+        target:
+          entity_id: media_player.televizor
+        data: {}
+      alias: Chromecast
+  alias: TV pause
+  description: ''
+tv_play:
+  sequence:
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: input_text.tv_source
+        state:
+        - pc
+      sequence:
+      - action: media_player.media_play
+        metadata: {}
+        target:
+          device_id: 684f74444c4499ff98d966a4775657f8
+        data: {}
+    - conditions:
+      - condition: state
+        entity_id: input_text.tv_source
+        state:
+        - chromecast
+      sequence:
+      - action: media_player.media_play
+        metadata: {}
+        target:
+          entity_id: media_player.televizor
+        data: {}
+      alias: Chromecast
+  alias: TV play
+  description: ''

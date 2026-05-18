@@ -88,6 +88,7 @@ allowing HA to load integrations normally.
   and commit inside the submodule so HA can import it.
 - To update a submodule: `cd submodules/<repo> && git fetch --tags && git checkout <new-tag>`.
   Then commit the submodule pointer change and symlink in the parent repo.
+- **Verify the exact `<domain>` directory name inside the submodule** before creating the symlink. The repo name (e.g. `hass_ingress`) often differs from the actual integration domain (e.g. `ingress`). Always run `ls submodules/<repo>/custom_components/` to confirm the exact folder name, then symlink `custom_components/<domain>` to `../submodules/<repo>/custom_components/<domain>`.
 - When cloning this repo on a new machine, use `git clone --recurse-submodules` or run
   `git submodule update --init --recursive` afterwards.
 

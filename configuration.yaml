@@ -1,13 +1,112 @@
-
-# Loads default set of integrations. Do not remove.
-default_config:
+# Replaces default_config (excludes cloud which needs subscription)
+assist_pipeline:
+bluetooth:
+conversation:
+dhcp:
+energy:
+file:
+go2rtc:
+history:
+homeassistant_alerts:
+logbook:
+media_source:
+mobile_app:
+my:
+ssdp:
+stream:
+sun:
+usage_prediction:
+usb:
+webhook:
+zeroconf:
 
 # Load frontend themes from the themes folder
 frontend:
   themes: !include_dir_merge_named themes
 
-template: !include templates.yaml
+ingress:
+  code_server:
+    require_admin: true
+    title: Code
+    icon: mdi:code-braces
+    url: http://code-server:8080
+    work_mode: ingress
+    ui_mode: toolbar
+  esphome:
+    require_admin: true
+    title: ESPHome
+    icon: mdi:chip
+    url: http://esphome:6052
+    work_mode: ingress
+    ui_mode: toolbar
 
 automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
+
+# device_tracker:
+#   - platform: ubee
+#     host: 192.168.0.1
+#     username: admin
+#     password: 39C2418f31
+
+# media_player:
+#   #   - platform: samsungtv_tizen
+#   # host: 192.168.0.26
+#   # mac: 24:4B:03:CE:05:E???
+#   - platform: universal
+#     name: tv
+#     children:
+#       - media_player.televizor4_2
+#       - media_player.televizor
+#     commands:
+#       turn_on:
+#         action: media_player.turn_on
+#         target:
+#           entity_id: media_player.televizor
+#       turn_off:
+#         action: media_player.turn_off
+#         target:
+#           entity_id: media_player.televizor
+#       volume_up:
+#         action: media_player.volume_up
+#         target:
+#           entity_id: media_player.televizor4_2
+#       volume_down:
+#         action: media_player.volume_down
+#         target:
+#           entity_id: media_player.televizor4_2
+#       volume_set:
+#         action: media_player.volume_set
+#         target:
+#           entity_id: media_player.televizor4_2
+#         data:
+#           volume_level: "{{ volume_level }}"
+#     attributes:
+#       state: media_player.televizor4_2
+#       volume_level: media_player.televizor4_2|volume_level
+#     device_class: tv
+#     unique_id: 297b48e9-557a-455e-bfa2-b005829e9fea
+
+# yandex_smart_home:
+#   entity_config:
+#     media_player.gostinaia:
+#       custom_ranges:
+#         volume:
+#           set_value:
+#             action: media_player.volume_set
+#             entity_id: media_player.tv
+#             data:
+#               volume_level: "{{ value / 10 }}"
+
+logger:
+  default: info
+  logs:
+    bellows: debug
+    bellows.ezsp: debug
+    zigpy: debug
+    zigpy.zdo: debug
+    zha: debug
+
+homeassistant:
+  packages: !include_dir_named packages

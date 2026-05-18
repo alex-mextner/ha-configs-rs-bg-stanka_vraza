@@ -27,3 +27,6 @@
 [submodule "submodules/YandexStation"]
 	path = submodules/YandexStation
 	url = https://github.com/AlexxIT/YandexStation.git
+[submodule "submodules/hass_ingress"]
+	path = submodules/hass_ingress
+	url = https://github.com/lovelylain/hass_ingress.git

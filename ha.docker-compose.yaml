@@ -1,0 +1,162 @@
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - /home/ultra/homeassistant:/config
+      - /run/dbus:/run/dbus:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8123:8123"
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - ha-net
+
+  esphome:
+    image: ghcr.io/esphome/esphome:latest
+    volumes:
+      - /home/ultra/esphome:/config
+    ports:
+      - "6052:6052"
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+  music-assistant:
+    image: ghcr.io/music-assistant/server:latest
+    volumes:
+      - /home/ultra/music-assistant:/data
+    ports:
+      - "8095:8095"
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    environment:
+      - SUBDOMAINS=stvrz
+      - TOKEN=873f27fb-4c66-4e21-905e-54c73da27d83
+    volumes:
+      - /home/ultra/ssl:/config
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+  ssh-server:
+    image: linuxserver/openssh-server:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - USER_NAME=hassio
+      - PASSWORD_ACCESS=true
+      - USER_PASSWORD=homeassistant
+      - SUDO_ACCESS=true
+    volumes:
+      - /home/ultra/ssh-data:/config
+      - /home/ultra/homeassistant:/homeassistant:ro
+    ports:
+      - "2222:2222"
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+  wyoming-openwakeword:
+    image: rhasspy/wyoming-openwakeword
+    command: --preload-model 'hey_jarvis' --threshold 0.6 --debug
+    ports:
+      - "10400:10400"
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+  wyoming-faster-whisper:
+    image: wyoming-faster-whisper-cuda
+    volumes:
+      - /home/ultra/wyoming-data:/data
+    command:
+      - --uri
+      - tcp://0.0.0.0:10300
+      - --data-dir
+      - /data
+      - --device
+      - cuda
+      - --model
+      - large-v3-turbo
+      - --language
+      - auto
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - ha-net
+
+  wyoming-satellite:
+    image: lunyaadev/rhasspy-wyoming-satellite:latest
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    volumes:
+      - /home/ultra/sounds:/app/sounds
+    command:
+      [
+        "--name", "Jarvis",
+        "--uri", "tcp://0.0.0.0:10700",
+        "--mic-command", "arecord -D plughw:2,0 -r 16000 -c 1 -f S16_LE -t raw",
+        "--snd-command", "aplay -D plughw:1,0 -r 22050 -c 1 -f S16_LE -t raw",
+        "--startup-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
+        "--wake-uri", "tcp://wyoming-openwakeword:10400",
+        "--wake-word-name", "hey_jarvis",
+        "--detection-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
+        "--tts-played-command", "aplay -D plughw:1,0 /app/sounds/done.wav",
+        "--no-zeroconf", "--debug", "--debug-recording-dir", "/tmp/debug",
+      ]
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - /home/ultra/.ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=5m
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - ha-net
+
+  code-server:
+    image: codercom/code-server:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+      - SUDO_PASSWORD=homeassistant
+    command: ["--bind-addr", "0.0.0.0:8080", "--auth", "none", "/homeassistant"]
+    volumes:
+      - /home/ultra/code-server-data:/home/coder
+      - /home/ultra/code-server-data/entrypoint.d:/entrypoint.d
+      - /home/ultra/homeassistant:/homeassistant
+      - /home/ultra/esphome:/esphome:ro
+    ports:
+      - "8443:8080"
+    restart: unless-stopped
+    networks:
+      - ha-net
+
+networks:
+  ha-net:
+    driver: bridge

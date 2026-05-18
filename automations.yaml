@@ -1,1 +1,63 @@
----
+- id: '1774722378469'
+  alias: ПЕРЕКЛЮЧИТЬ ЛЮСТРУ В СПАЛЬНЕ ПО ВЫКЛЮЧАТЕЛЮ
+  description: ''
+  triggers:
+  - device_id: b84bfce07c0aeee660a422c88b543582
+    domain: zha
+    type: remote_button_short_press
+    subtype: remote_button_short_press
+    trigger: device
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    data: {}
+    target:
+      entity_id: light.liustra
+  mode: single
+- id: '1775259577857'
+  alias: 'Перед сном поставить телефон на зарядку '
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 5be8db2da121a5bc08b60d2fdd0e63a2
+    entity_id: ac7bf9f1e75a0f7b85492fb76c94c7cb
+    domain: light
+    trigger: device
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 2
+  conditions:
+  - condition: time
+    after: '22:00:00'
+    before: 06:00:00
+  - type: is_battery_level
+    condition: device
+    device_id: cb0b81f0cf1724dc92086539878ac9e9
+    entity_id: 5b0546bfd758a6b5773a0ae64c32d3b6
+    domain: sensor
+    below: 60
+  actions:
+  - data:
+      message: Проверь зарядку телефона
+      options:
+        volume_level: 0.5
+      entity_id: media_player.yandex_station_m10dst310hxnpk
+    action: tts.yandex_station_say
+  mode: single
+- id: '1778670185980'
+  alias: "Motion Detection: auto-enable after 4 hours"
+  description: "Re-enables motion detection on esp32-c3-light if left off for 4 hours."
+  triggers:
+    - trigger: state
+      entity_id: switch.motion_detection
+      to: "off"
+      for:
+        hours: 4
+  conditions: []
+  actions:
+    - action: switch.turn_on
+      target:
+        entity_id: switch.motion_detection
+  mode: single
