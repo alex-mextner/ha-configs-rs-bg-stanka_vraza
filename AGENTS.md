@@ -91,6 +91,51 @@ allowing HA to load integrations normally.
 - When cloning this repo on a new machine, use `git clone --recurse-submodules` or run
   `git submodule update --init --recursive` afterwards.
 
+### HACS version cache mismatch
+When submodules are updated via `git` (not through the HACS UI), HACS still shows the old version in its `update.*` entities because it caches `installed_commit` and `version_installed` in `.storage/hacs.repositories`.
+
+**Fix:** Update the cached values in `.storage/hacs.repositories` to match the current submodule HEAD and manifest version, then restart HA (or call `update.clear_skipped` if you previously skipped the stale notifications).
+
+Example quick-fix (run from repo root after updating submodules):
+```python
+import json, subprocess
+
+repo_map = {
+    "goruck/home-generative-agent": ("submodules/home-generative-agent", "home_generative_agent"),
+    "5a2v0/HA-WiFi-Sensor-Tracker": ("submodules/HA-WiFi-Sensor-Tracker", "wifi_sensor_tracker"),
+    "azerty9971/xtend_tuya": ("submodules/xtend_tuya", "xtend_tuya"),
+    "AlexxIT/Dataplicity": ("submodules/dataplicity", "dataplicity"),
+    "dext0r/yandex_smart_home": ("submodules/yandex_smart_home", "yandex_smart_home"),
+    "AlexxIT/YandexStation": ("submodules/YandexStation", "yandex_station"),
+    "ganhammar/hass-mcp-server": ("submodules/hass-mcp-server", "mcp_server_http_transport"),
+    "hacs/integration": ("submodules/hacs", "hacs"),
+}
+
+with open('.storage/hacs.repositories') as f:
+    data = json.load(f)
+
+for repo_key, repo_val in data['data'].items():
+    full_name = repo_val.get('full_name')
+    if full_name not in repo_map:
+        continue
+    submodule_path, domain = repo_map[full_name]
+    head = subprocess.check_output(
+        ['git', '-C', submodule_path, 'rev-parse', '--short', 'HEAD']
+    ).decode().strip()
+    with open(f"{submodule_path}/custom_components/{domain}/manifest.json") as mf:
+        manifest = json.load(mf)
+    version = manifest.get('version', '')
+    repo_val['installed_commit'] = head
+    repo_val['version_installed'] = str(version) if version else repo_val.get('last_version', '')
+
+with open('.storage/hacs.repositories', 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+```
+
+Then restart HA: `docker restart homeassistant-homeassistant-1`.
+
+**Note:** `.storage/hacs.data` and `.storage/hacs.repositories` are HA runtime state files. Always back them up (`cp .storage/hacs.repositories /tmp/hacs.repositories.backup.$(date +%Y%m%d_%H%M%S).json`) before editing.
+
 ## Notes
 - The integration is a Home Assistant service integration (`manifest.json`).
 - Prefer the Makefile workflow for setup/tasks (`make devdeps`, `make testdeps`,
