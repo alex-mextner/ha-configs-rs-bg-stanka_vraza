@@ -320,3 +320,41 @@ Never edit `.storage/core.entity_registry` directly. Always use `ha_fail_safe.sh
 1. Create backups automatically
 2. Validate changes before writing
 3. Trigger HA restart if needed
+
+## agent-browser CLI
+
+`agent-browser` is installed system-wide (brew) and is the preferred tool for UI verification and frontend automation.
+
+### Common commands
+```bash
+# Open HA page with API token auth (headers only work for API endpoints; frontend needs login)
+agent-browser --headers '{"Authorization":"Bearer '$HA_TOKEN'"}' open http://localhost:8123
+
+# Take screenshot for visual verification
+agent-browser screenshot /tmp/ha-panel.png
+
+# Get compact accessibility snapshot (good for AI parsing)
+agent-browser snapshot -c
+
+# Full interactive snapshot
+agent-browser snapshot -i
+
+# Click element by ref from snapshot
+agent-browser click @e2
+
+# Fill form field
+agent-browser fill @e3 "text"
+
+# Evaluate JS in page
+agent-browser eval "document.title"
+```
+
+### Tips
+- Frontend panels require HA username/password login; API tokens only work for REST/websocket.
+- Use `--headed` for visual debugging (shows browser window).
+- Use `--session-name ha` to persist cookies across commands.
+- Chain commands with `&&`: `agent-browser open URL && agent-browser snapshot`.
+
+## Ingress UI mode values
+Valid `ui_mode` values for `hass_ingress` are: `normal`, `replace`, `toolbar`.
+`panel` is **not valid** and will cause the ingress integration to fail setup, removing all sidebar items.
