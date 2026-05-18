@@ -30,3 +30,6 @@
 [submodule "submodules/hass-ingress-fork"]
 	path = submodules/hass-ingress-fork
 	url = https://github.com/lovelylain/hass_ingress.git
+[submodule "submodules/fish-audio-ru"]
+	path = submodules/fish-audio-ru
+	url = https://github.com/alex-mextner/ha-fish-audio-ru.git
