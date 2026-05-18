@@ -33,3 +33,9 @@
 [submodule "submodules/fish-audio-ru"]
 	path = submodules/fish-audio-ru
 	url = https://github.com/alex-mextner/ha-fish-audio-ru.git
+[submodule "submodules/ha-ubee"]
+	path = submodules/ha-ubee
+	url = https://github.com/KevinHaendel/ha-ubee.git
+[submodule "submodules/hass-music-assistant"]
+	path = submodules/hass-music-assistant
+	url = https://github.com/music-assistant/hass-music-assistant.git

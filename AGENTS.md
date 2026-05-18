@@ -257,6 +257,32 @@ An attempt to "clean up git history" caused a cascading failure:
 
 Use `git diff` to verify changes before committing.
 
+## Secrets management
+
+**Never commit secrets into git.** Credentials, API keys, tokens, and passwords must always live outside the repository.
+
+### Rules
+- All sensitive values go into `secrets.yaml`.
+- `secrets.yaml` is already in `.gitignore` — verify this before adding any secrets.
+- In YAML configs use `!secret <key_name>` instead of a literal value.
+- If a secret is accidentally committed:
+  1. **Rotate the secret immediately** (change password, revoke token, etc.). The value is permanently in git history.
+  2. Move it to `secrets.yaml` and reference with `!secret`.
+  3. Do **not** attempt destructive git history rewrites (`rebase`, `reset --hard`, `filter-branch`) on `main` — they are prohibited by this repo's safety rules.
+
+### Example
+```yaml
+# GOOD — secrets.yaml
+ubee_password: YOUR_ROUTER_PASSWORD_HERE
+
+# GOOD — configuration.yaml
+device_tracker:
+  - platform: ubee
+    host: 192.168.0.1
+    username: admin
+    password: !secret ubee_password
+```
+
 # HA Fail-Safe System
 
 ## Problem

@@ -39,16 +39,24 @@ ingress:
     url: http://esphome:6052
     work_mode: ingress
     ui_mode: normal
+  music_assistant:
+    require_admin: true
+    title: Music Assistant
+    icon: mdi:music-box
+    url: http://music-assistant:8095
+    work_mode: ingress
+    ui_mode: normal
 
 automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
-# device_tracker:
-#   - platform: ubee
-#     host: 192.168.0.1
-#     username: admin
-#     password: 39C2418f31
+device_tracker:
+  - platform: ubee
+    host: 192.168.0.1
+    username: admin
+    password: !secret ubee_password
+    model: EVW32C-0N
 
 # media_player:
 #   #   - platform: samsungtv_tizen
