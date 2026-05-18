@@ -12,6 +12,13 @@ http:
 frontend:
   themes: !include_dir_merge_named themes
 
+# ESPHome Dashboard panel
+panel_iframe:
+  esphome:
+    title: ESPHome
+    url: "http://homeassistant-esphome-1:6052"
+    icon: mdi:chip
+
 template: !include templates.yaml
 
 automation: !include automations.yaml
