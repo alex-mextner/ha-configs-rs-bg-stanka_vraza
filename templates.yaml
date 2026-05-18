@@ -1,0 +1,23 @@
+- light:
+    - name: "Кухня"
+      unique_id: kukhnia_white_wrapper
+      availability: "{{ states('light.kukhnia') not in ['unknown', 'unavailable'] }}"
+      state: "{{ states('light.kukhnia') }}"
+      turn_on:
+        - service: light.turn_on
+          target:
+            entity_id: light.kukhnia
+          data:
+            brightness: 255
+            color_temp_kelvin: 4000
+      turn_off:
+        - service: light.turn_off
+          target:
+            entity_id: light.kukhnia
+      set_level:
+        - service: light.turn_on
+          target:
+            entity_id: light.kukhnia
+          data:
+            brightness: "{{ brightness }}"
+            color_temp_kelvin: 4000
