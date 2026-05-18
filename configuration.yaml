@@ -96,6 +96,10 @@ device_tracker:
 #     device_class: tv
 #     unique_id: 297b48e9-557a-455e-bfa2-b005829e9fea
 
+yandex_station:
+  domain: yandex.com
+  ssl: false
+
 # yandex_smart_home:
 #   entity_config:
 #     media_player.gostinaia:
