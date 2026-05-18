@@ -1,10 +1,12 @@
 # artifacts
 __pycache__
+**/__pycache__/
+*.pyc
+**/*.pyc
 .pytest*
 *.egg-info
 */build/*
 */dist/*
-*.pyc
 
 
 # misc
