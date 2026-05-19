@@ -7,24 +7,31 @@ command_line:
       name: CPU Usage
       command: "awk '/^cpu /{u=$2; n=$4; i=$5; t=u+n+i; if(t>0) printf(\"%.0f\", (u+n)*100/t); else print 0}' /proc/stat"
       unit_of_measurement: "%"
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_cpu_usage
 
   - sensor:
       name: Load Average 1m
       command: "awk '{print $1}' /proc/loadavg"
+      unit_of_measurement: ""
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_load_1m
 
   - sensor:
       name: Load Average 5m
       command: "awk '{print $2}' /proc/loadavg"
+      unit_of_measurement: ""
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_load_5m
 
   - sensor:
       name: Load Average 15m
       command: "awk '{print $3}' /proc/loadavg"
+      unit_of_measurement: ""
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_load_15m
 
@@ -32,6 +39,7 @@ command_line:
       name: Memory Usage Percent
       command: "free | awk '/Mem/{printf(\"%.0f\", $3/$2 * 100.0)}'"
       unit_of_measurement: "%"
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_mem_pct
 
@@ -39,6 +47,7 @@ command_line:
       name: Memory Free MB
       command: "free -m | awk '/Mem/{print $7}'"
       unit_of_measurement: "MiB"
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_mem_free
 
@@ -46,6 +55,7 @@ command_line:
       name: Swap Usage Percent
       command: "free | awk '/Swap/{if($2>0) printf(\"%.0f\", $3/$2 * 100.0); else print 0}'"
       unit_of_measurement: "%"
+      state_class: measurement
       scan_interval: 60
       unique_id: system_monitor_swap_pct
 
@@ -53,6 +63,7 @@ command_line:
       name: Disk Usage Root
       command: "df / | awk 'NR==2{print $5}' | sed 's/%//'"
       unit_of_measurement: "%"
+      state_class: measurement
       scan_interval: 300
       unique_id: system_monitor_disk_root
 

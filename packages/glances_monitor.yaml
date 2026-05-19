@@ -131,6 +131,20 @@ template:
           load_15m: "{{ states('sensor.glances_load_15m') | float(0) }}"
 
   - binary_sensor:
+      - name: "Glances System Problem"
+        unique_id: glances_system_problem
+        device_class: problem
+        state: >
+          {% set s = states('sensor.glances_system_summary') %}
+          {{ s in ['warning', 'critical'] }}
+
+      - name: "Glances System Critical"
+        unique_id: glances_system_critical
+        device_class: problem
+        state: >
+          {{ states('sensor.glances_system_summary') == 'critical' }}
+
+  - binary_sensor:
       - name: "Glances High IO Wait"
         unique_id: glances_high_iowait
         device_class: problem

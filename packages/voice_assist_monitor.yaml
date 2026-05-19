@@ -1,5 +1,5 @@
 # Voice Assist Monitor & Tune Package
-# Real-time pipeline state, tuning controls, debug recordings
+# Real-time pipeline state, tuning controls, debug recordings, latency metrics
 
 # ── Input helpers for live tuning ──
 input_number:
@@ -46,24 +46,47 @@ input_boolean:
     icon: mdi:record-rec
     initial: true
 
-# ── Template sensors for pipeline state ──
+# ── Latency tracking timestamps ──
+input_datetime:
+  pipeline_start_time:
+    name: "Pipeline Start"
+    has_date: true
+    has_time: true
+    icon: mdi:timer-play-outline
+
+  stt_done_time:
+    name: "STT Done"
+    has_date: true
+    has_time: true
+    icon: mdi:timer-stop-outline
+
+  llm_done_time:
+    name: "LLM Done"
+    has_date: true
+    has_time: true
+    icon: mdi:brain
+
+# ── Template sensors for pipeline state & latency ──
 template:
   - sensor:
       - name: "Voice Pipeline Stage"
         unique_id: voice_pipeline_stage
         state: >
-          {{ states('sensor.jarvis_pipeline_stage') | default('idle') }}
+          {{ states('assist_satellite.jarvis') | default('idle') }}
         attributes:
           last_wake: "{{ state_attr('sensor.last_wake_word', 'last_detection') | default('never') }}"
 
       - name: "Last Wake Word"
         unique_id: last_wake_word
         state: >
-          {{ now().strftime('%H:%M:%S') }}
+          {% set t = states('input_datetime.pipeline_start_time') %}
+          {% if t not in ['unknown','unavailable','none',''] %}
+            {{ as_timestamp(t) | timestamp_custom('%H:%M:%S') }}
+          {% else %}
+            —
+          {% endif %}
         attributes:
-          word: "{{ state_attr('sensor.last_wake_word', 'word') | default('none') }}"
-          confidence: "{{ state_attr('sensor.last_wake_word', 'confidence') | default('unknown') }}"
-          source: "{{ state_attr('sensor.last_wake_word', 'source') | default('unknown') }}"
+          raw_datetime: "{{ states('input_datetime.pipeline_start_time') | default('never') }}"
 
       - name: "Last STT Transcript"
         unique_id: last_stt_transcript
@@ -75,14 +98,93 @@ template:
         state: >
           {{ states('sensor.last_tts_text') | default('—') }}
 
+      - name: "Pipeline Total Latency"
+        unique_id: pipeline_total_latency
+        unit_of_measurement: "s"
+        state_class: measurement
+        state: >
+          {% set start = states('input_datetime.pipeline_start_time') %}
+          {% set end = states('input_datetime.llm_done_time') %}
+          {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
+            {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
+          {% else %}
+            0
+          {% endif %}
+        attributes:
+          stt_latency: >
+            {% set start = states('input_datetime.pipeline_start_time') %}
+            {% set end = states('input_datetime.stt_done_time') %}
+            {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
+              {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
+            {% else %}0{% endif %}
+          llm_latency: >
+            {% set start = states('input_datetime.stt_done_time') %}
+            {% set end = states('input_datetime.llm_done_time') %}
+            {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
+              {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
+            {% else %}0{% endif %}
+
+      - name: "LLM Provider Health"
+        unique_id: llm_provider_health
+        state: >
+          {{ states('conversation.home_generative_agent_2') | default('unknown') }}
+        attributes:
+          last_response_time: "{{ state_attr('conversation.home_generative_agent_2', 'last_response_time') | default('unknown') }}"
+
 # ── Shell commands to restart voice services with new settings ──
 shell_command:
   voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-porcupine1 wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
 
-# ── Automation: apply tuning changes ──
+# ── Automations: latency tracking ──
 automation:
+  - id: voice_track_pipeline_start
+    alias: "Voice: Track Pipeline Start"
+    trigger:
+      - platform: state
+        entity_id: assist_satellite.jarvis
+        from: "idle"
+        to: "listening"
+    action:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.pipeline_start_time
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+    mode: single
+
+  - id: voice_track_stt_done
+    alias: "Voice: Track STT Done"
+    trigger:
+      - platform: state
+        entity_id: assist_satellite.jarvis
+        from: "listening"
+        to: "processing"
+    action:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.stt_done_time
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+    mode: single
+
+  - id: voice_track_llm_done
+    alias: "Voice: Track LLM Done"
+    trigger:
+      - platform: state
+        entity_id: conversation.home_generative_agent_2
+    condition:
+      - condition: template
+        value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
+    action:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.llm_done_time
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+    mode: single
+
   - id: voice_apply_sensitivity
     alias: "Voice: Apply Sensitivity Change"
     trigger:
@@ -98,18 +200,18 @@ automation:
   - id: voice_log_detection
     alias: "Voice: Log Wake Word Detection"
     trigger:
-      - platform: event
-        event_type: state_changed
+      - platform: state
+        entity_id: sensor.last_wake_word
     condition:
       - condition: template
-        value_template: "{{ trigger.event.data.entity_id == 'sensor.last_wake_word' }}"
+        value_template: "{{ trigger.to_state.state != '—' and trigger.to_state.state != trigger.from_state.state }}"
     action:
       - service: logbook.log
         data:
           name: "Wake Word"
-          message: "Detected '{{ state_attr('sensor.last_wake_word', 'word') }}' from {{ state_attr('sensor.last_wake_word', 'source') }}"
+          message: "Detected at {{ trigger.to_state.state }} (pipeline started)"
 
-# ── Command line sensor: satellite container health ──
+# ── Command line sensor: container health ──
 command_line:
   - sensor:
       name: "Wyoming Satellite Health"
@@ -124,6 +226,3 @@ command_line:
       command: "docker inspect -f '{{.State.Status}}' homeassistant-wyoming-porcupine1-1 2>/dev/null || echo 'stopped'"
       scan_interval: 30
       value_template: "{{ value }}"
-
-# ── Media source folder for debug recordings ──
-# Ensure /home/ultra/wyoming-debug exists and is mounted into satellite container
