@@ -126,7 +126,7 @@ services:
       [
         "--name", "Jarvis",
         "--uri", "tcp://0.0.0.0:10700",
-        "--mic-command", "arecord -D plughw:2,0 -r 16000 -c 1 -f S16_LE -t raw",
+        "--mic-command", "/app/sounds/capture_ch0.sh",
         "--snd-command", "aplay -D plughw:1,0 -r 22050 -c 1 -f S16_LE -t raw",
         "--startup-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
         "--wake-uri", "tcp://wyoming-openwakeword:10400",
