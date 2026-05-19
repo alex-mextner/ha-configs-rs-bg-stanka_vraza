@@ -1,0 +1,129 @@
+# Voice Assist Monitor & Tune Package
+# Real-time pipeline state, tuning controls, debug recordings
+
+# ── Input helpers for live tuning ──
+input_number:
+  wake_word_sensitivity:
+    name: "Wake Word Sensitivity"
+    min: 0.1
+    max: 1.0
+    step: 0.1
+    unit_of_measurement: ""
+    icon: mdi:ear-hearing
+    initial: 0.7
+
+  mic_noise_suppression:
+    name: "Mic Noise Suppression"
+    min: 0
+    max: 4
+    step: 1
+    unit_of_measurement: ""
+    icon: mdi:noise-off
+    initial: 3
+
+  mic_auto_gain:
+    name: "Mic Auto Gain"
+    min: 0
+    max: 31
+    step: 1
+    unit_of_measurement: ""
+    icon: mdi:volume-high
+    initial: 15
+
+  mute_after_awake:
+    name: "Mute After Awake"
+    min: 0
+    max: 3
+    step: 0.5
+    unit_of_measurement: "s"
+    icon: mdi:microphone-off
+    initial: 1.5
+
+# ── Toggle debug recording persistence ──
+input_boolean:
+  voice_debug_recording:
+    name: "Save Debug Recordings"
+    icon: mdi:record-rec
+    initial: true
+
+# ── Template sensors for pipeline state ──
+template:
+  - sensor:
+      - name: "Voice Pipeline Stage"
+        unique_id: voice_pipeline_stage
+        state: >
+          {{ states('sensor.jarvis_pipeline_stage') | default('idle') }}
+        attributes:
+          last_wake: "{{ state_attr('sensor.last_wake_word', 'last_detection') | default('never') }}"
+
+      - name: "Last Wake Word"
+        unique_id: last_wake_word
+        state: >
+          {{ now().strftime('%H:%M:%S') }}
+        attributes:
+          word: "{{ state_attr('sensor.last_wake_word', 'word') | default('none') }}"
+          confidence: "{{ state_attr('sensor.last_wake_word', 'confidence') | default('unknown') }}"
+          source: "{{ state_attr('sensor.last_wake_word', 'source') | default('unknown') }}"
+
+      - name: "Last STT Transcript"
+        unique_id: last_stt_transcript
+        state: >
+          {{ states('sensor.last_stt_text') | default('—') }}
+
+      - name: "Last TTS Response"
+        unique_id: last_tts_response
+        state: >
+          {{ states('sensor.last_tts_text') | default('—') }}
+
+# ── Shell commands to restart voice services with new settings ──
+shell_command:
+  voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-porcupine1 wyoming-satellite"
+  voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
+  voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
+
+# ── Automation: apply tuning changes ──
+automation:
+  - id: voice_apply_sensitivity
+    alias: "Voice: Apply Sensitivity Change"
+    trigger:
+      - platform: state
+        entity_id: input_number.wake_word_sensitivity
+    action:
+      - service: notify.persistent_notification
+        data:
+          title: "Wake Word Tune"
+          message: "Sensitivity changed to {{ states('input_number.wake_word_sensitivity') }}. Restart voice services to apply."
+    mode: single
+
+  - id: voice_log_detection
+    alias: "Voice: Log Wake Word Detection"
+    trigger:
+      - platform: event
+        event_type: state_changed
+    condition:
+      - condition: template
+        value_template: "{{ trigger.event.data.entity_id == 'sensor.last_wake_word' }}"
+    action:
+      - service: logbook.log
+        data:
+          name: "Wake Word"
+          message: "Detected '{{ state_attr('sensor.last_wake_word', 'word') }}' from {{ state_attr('sensor.last_wake_word', 'source') }}"
+
+# ── Command line sensor: satellite container health ──
+command_line:
+  - sensor:
+      name: "Wyoming Satellite Health"
+      unique_id: wyoming_satellite_health
+      command: "docker inspect -f '{{.State.Status}}' homeassistant-wyoming-satellite-1 2>/dev/null || echo 'stopped'"
+      scan_interval: 30
+      value_template: "{{ value }}"
+
+  - sensor:
+      name: "Wyoming Porcupine1 Health"
+      unique_id: wyoming_porcupine1_health
+      command: "docker inspect -f '{{.State.Status}}' homeassistant-wyoming-porcupine1-1 2>/dev/null || echo 'stopped'"
+      scan_interval: 30
+      value_template: "{{ value }}"
+
+# ── Media source folder for debug recordings ──
+# Ensure /home/ultra/wyoming-debug exists and is mounted into satellite container

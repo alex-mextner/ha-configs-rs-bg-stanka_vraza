@@ -121,4 +121,14 @@ logger:
     zha: debug
 
 homeassistant:
+  internal_url: "http://192.168.0.39:8123"
   packages: !include_dir_named packages
+
+lovelace:
+  dashboards:
+    voice-monitor:
+      mode: yaml
+      title: Voice Monitor
+      icon: mdi:microphone
+      show_in_sidebar: true
+      filename: ui-voice-monitor.yaml

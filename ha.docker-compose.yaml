@@ -70,17 +70,13 @@ services:
     networks:
       - ha-net
 
-  wyoming-openwakeword:
-    image: rhasspy/wyoming-openwakeword
+  wyoming-porcupine1:
+    image: rhasspy/wyoming-porcupine1
     command:
-      - --preload-model
-      - hey_jarvis
-      - --threshold
-      - "0.85"
-      - --trigger-level
-      - "4"
-      - --refractory-seconds
-      - "3"
+      - --uri
+      - tcp://0.0.0.0:10400
+      - --sensitivity
+      - "0.7"
       - --debug
     ports:
       - "10400:10400"
@@ -122,15 +118,15 @@ services:
       - audio
     volumes:
       - /home/ultra/sounds:/app/sounds
+      - /home/ultra/wyoming-debug:/tmp/debug
     command:
       [
         "--name", "Jarvis",
         "--uri", "tcp://0.0.0.0:10700",
         "--mic-command", "/app/sounds/capture_ch0.sh",
         "--snd-command", "aplay -D plughw:1,0 -r 22050 -c 1 -f S16_LE -t raw",
-        "--startup-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
-        "--wake-uri", "tcp://wyoming-openwakeword:10400",
-        "--wake-word-name", "hey_jarvis",
+        "--wake-uri", "tcp://wyoming-porcupine1:10400",
+        "--wake-word-name", "jarvis",
         "--detection-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
         "--tts-played-command", "aplay -D plughw:1,0 /app/sounds/done.wav",
         "--mic-noise-suppression", "3",

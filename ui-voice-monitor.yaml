@@ -1,0 +1,75 @@
+title: Voice Monitor
+views:
+  - title: Pipeline
+    path: pipeline
+    badges: []
+    cards:
+      - type: entities
+        title: Service Health
+        entities:
+          - entity: sensor.wyoming_satellite_health
+            name: Satellite
+          - entity: sensor.wyoming_porcupine1_health
+            name: Porcupine1 Wake Word
+        show_header_toggle: false
+
+      - type: entities
+        title: Live Tuning
+        entities:
+          - entity: input_number.wake_word_sensitivity
+            name: Sensitivity (restart to apply)
+          - entity: input_number.mic_noise_suppression
+            name: Noise Suppression
+          - entity: input_number.mic_auto_gain
+            name: Auto Gain
+          - entity: input_number.mute_after_awake
+            name: Mute After Awake
+        show_header_toggle: false
+
+      - type: button
+        name: Restart Voice Services
+        tap_action:
+          action: call-service
+          service: shell_command.voice_restart_services
+        hold_action:
+          action: none
+        show_icon: true
+        icon: mdi:restart
+
+      - type: button
+        name: Stop Listening
+        tap_action:
+          action: call-service
+          service: shell_command.voice_stop_recording
+        icon: mdi:microphone-off
+
+      - type: button
+        name: Start Listening
+        tap_action:
+          action: call-service
+          service: shell_command.voice_start_recording
+        icon: mdi:microphone
+
+      - type: entities
+        title: Last Interaction
+        entities:
+          - entity: sensor.last_wake_word
+            name: Last Wake Word
+          - entity: sensor.last_stt_transcript
+            name: Last Command
+          - entity: sensor.last_tts_response
+            name: Last Response
+        show_header_toggle: false
+
+      - type: markdown
+        content: |
+          ## Debug Recordings
+          Files are saved to `/home/ultra/wyoming-debug/`.  
+          Use **Media Source** or SSH to browse and play.
+
+      - type: history-graph
+        title: Sensitivity Changes
+        entities:
+          - entity: input_number.wake_word_sensitivity
+        hours_to_show: 24
+        refresh_interval: 0
