@@ -412,18 +412,10 @@ A YAML syntax error in `packages/voice_conversation_log.yaml` (improperly escape
 - **Monitor `docker logs` for 60 seconds after any restart.** Look for `ERROR` or `recovery mode` messages.
 
 ### Safe reload script
-```bash
-# File: scripts/ha_safe_reload.sh
-# Usage: ./scripts/ha_safe_reload.sh
-# Steps: validate YAML → check HA health → restart container
-```
+File: `scripts/ha_safe_reload.sh` — validates YAML then restarts HA container.
 
-### Pre-commit hook
-```bash
-# File: .git/hooks/pre-commit
-# Validates all staged .yaml files via yaml.safe_load()
-# Blocks commit if any file has syntax errors
-```
+### Pre-commit hook  
+File: `.git/hooks/pre-commit` — validates staged `.yaml` files via HA container's PyYAML before allowing commit.
 
 ## agent-browser CLI
 
