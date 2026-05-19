@@ -190,6 +190,8 @@ shell_command:
   voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-porcupine1 wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
+  voice_play_last_wake: "aplay -D plughw:1,0 $(ls -1t /home/ultra/wyoming-debug/*-wake.wav 2>/dev/null | head -n1) 2>/dev/null || echo 'no files'"
+  voice_play_last_stt: "aplay -D plughw:1,0 $(ls -1t /home/ultra/wyoming-debug/*-stt.wav 2>/dev/null | head -n1) 2>/dev/null || echo 'no files'"
 
 # ── Automations: latency tracking ──
 automation:
@@ -321,3 +323,10 @@ command_line:
       command: "ls -1 /home/ultra/wyoming-debug/*.wav 2>/dev/null | sed 's|/home/ultra/wyoming-debug/||' | paste -sd ',' - || echo ''"
       scan_interval: 30
       value_template: "{{ value }}"
+
+  - sensor:
+      name: "Debug Recording Count"
+      unique_id: debug_recording_count
+      command: "ls -1 /home/ultra/wyoming-debug/*.wav 2>/dev/null | wc -l"
+      scan_interval: 30
+      value_template: "{{ value | int(0) }}"

@@ -193,12 +193,35 @@ views:
           - type: entities
             title: Debug Recordings
             entities:
+              - entity: sensor.debug_recording_count
+                name: Files stored
               - entity: sensor.latest_debug_recording
-                name: Latest File
+                name: Latest file
             show_header_toggle: false
+
+          - type: horizontal-stack
+            cards:
+              - type: button
+                name: Play last wake (2s before)
+                tap_action:
+                  action: call-service
+                  service: shell_command.voice_play_last_wake
+                hold_action:
+                  action: none
+                show_icon: true
+                icon: mdi:ear-hearing
+              - type: button
+                name: Play last command
+                tap_action:
+                  action: call-service
+                  service: shell_command.voice_play_last_stt
+                hold_action:
+                  action: none
+                show_icon: true
+                icon: mdi:microphone-message
 
           - type: markdown
             content: |
-              **Debug recordings:** `/home/ultra/wyoming-debug/`  
-              Use `aplay` or copy to PC to listen.  
-              Files: `*-wake.wav` (2s before wake), `*-stt.wav` (command audio).
+              **What are these?**
+              `*-wake.wav` — 2 seconds *before* wake word fired. Listen to understand false activations.
+              `*-stt.wav` — your voice command after wake word.
