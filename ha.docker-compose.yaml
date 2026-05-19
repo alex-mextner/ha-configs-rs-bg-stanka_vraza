@@ -82,9 +82,7 @@ services:
       - "10400:10400"
     restart: unless-stopped
     networks:
-      ha-net:
-        aliases:
-          - wyoming-openwakeword
+      - ha-net
 
   wyoming-faster-whisper:
     image: wyoming-faster-whisper-cuda
