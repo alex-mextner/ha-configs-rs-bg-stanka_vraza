@@ -190,8 +190,8 @@ shell_command:
   voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-porcupine1 wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
-  voice_play_last_wake: "aplay -D plughw:1,0 $(ls -1t /home/ultra/wyoming-debug/*-wake.wav 2>/dev/null | head -n1) 2>/dev/null || echo 'no files'"
-  voice_play_last_stt: "aplay -D plughw:1,0 $(ls -1t /home/ultra/wyoming-debug/*-stt.wav 2>/dev/null | head -n1) 2>/dev/null || echo 'no files'"
+  voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:1,0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
+  voice_play_last_stt: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:1,0 $(ls -1t /tmp/debug/*-stt.wav | head -n1)' 2>/dev/null || echo 'failed'"
 
 # ── Automations: latency tracking ──
 automation:
@@ -306,14 +306,14 @@ command_line:
   - sensor:
       name: "Wyoming Satellite Health"
       unique_id: wyoming_satellite_health
-      command: "docker inspect -f '{{.State.Status}}' homeassistant-wyoming-satellite-1 2>/dev/null || echo 'stopped'"
+      command: "docker ps | grep homeassistant-wyoming-satellite-1 | grep -q Up && echo running || echo stopped"
       scan_interval: 30
       value_template: "{{ value }}"
 
   - sensor:
       name: "Wyoming Porcupine1 Health"
       unique_id: wyoming_porcupine1_health
-      command: "docker inspect -f '{{.State.Status}}' homeassistant-wyoming-porcupine1-1 2>/dev/null || echo 'stopped'"
+      command: "docker ps | grep homeassistant-wyoming-porcupine1-1 | grep -q Up && echo running || echo stopped"
       scan_interval: 30
       value_template: "{{ value }}"
 

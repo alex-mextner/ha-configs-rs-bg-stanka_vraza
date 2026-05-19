@@ -225,3 +225,33 @@ views:
               **What are these?**
               `*-wake.wav` — 2 seconds *before* wake word fired. Listen to understand false activations.
               `*-stt.wav` — your voice command after wake word.
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Real-time Conversation
+            entities:
+              - entity: input_text.last_voice_request
+                name: Last Request
+              - entity: input_text.last_voice_response
+                name: Last Response
+              - entity: input_boolean.voice_pipeline_paused
+                name: Pause / Stop
+            show_header_toggle: false
+
+          - type: markdown
+            content: |
+              **History:**
+              {{ states('input_text.conversation_history') | replace('\n', '<br>') }}
+
+          - type: button
+            name: Clear History
+            tap_action:
+              action: call-service
+              service: input_text.set_value
+              target:
+                entity_id: input_text.conversation_history
+              data:
+                value: ""
+            show_icon: true
+            icon: mdi:delete-sweep
