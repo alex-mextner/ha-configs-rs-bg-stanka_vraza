@@ -126,6 +126,12 @@ homeassistant:
 
 lovelace:
   dashboards:
+    voice-monitor:
+      mode: yaml
+      title: Voice Monitor
+      icon: mdi:microphone
+      show_in_sidebar: true
+      filename: ui-voice-monitor.yaml
     system-metrics:
       mode: yaml
       title: System & Metrics

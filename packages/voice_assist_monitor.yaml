@@ -112,6 +112,16 @@ template:
         attributes:
           raw_datetime: "{{ states('input_datetime.pipeline_start_time') | default('never') }}"
 
+      - name: "Last STT Text"
+        unique_id: last_stt_text
+        state: >
+          {{ states('input_text.last_voice_request') | default('—') }}
+
+      - name: "Last TTS Text"
+        unique_id: last_tts_text
+        state: >
+          {{ states('input_text.last_voice_response') | default('—') }}
+
       - name: "Pipeline Total Latency"
         unique_id: pipeline_total_latency
         unit_of_measurement: "s"
