@@ -393,6 +393,38 @@ Never edit `.storage/core.entity_registry` directly. Always use `ha_fail_safe.sh
 2. Validate changes before writing
 3. Trigger HA restart if needed
 
+## Lessons learned — YAML safety and config validation (2026-05-19)
+
+### What broke
+A YAML syntax error in `packages/voice_conversation_log.yaml` (improperly escaped newline inside a quoted string value) caused Home Assistant to fail parsing the entire configuration on restart. HA entered **recovery mode**, breaking all automations, voice pipeline, and integrations until the bad file was fixed and HA restarted again.
+
+### Root causes
+1. Directly writing complex YAML with inline string concatenation (`"...\n..." | trim`) without validation.
+2. No pre-commit or pre-reload validation of YAML syntax.
+3. Restarting HA immediately after editing without checking config.
+
+### Rules enforced from now on
+- **Always validate YAML before committing or reloading HA.** Run `python3 -c "import yaml; yaml.safe_load(open('FILE.yaml'))"` on every changed `.yaml` file.
+- **Use `./scripts/ha_safe_reload.sh` instead of raw `docker restart`.** It validates all YAML files first and aborts if any are invalid.
+- **Pre-commit hook validates YAML automatically.** `.git/hooks/pre-commit` now runs `yaml.safe_load()` on every staged `.yaml` file and blocks the commit if invalid.
+- **Never use `"\n"` inside inline YAML quoted strings.** Use YAML block scalars (`|` or `>`) or Jinja `{% set %}` blocks for multiline content.
+- **Test one package at a time.** After adding a new `packages/*.yaml`, reload only that package via **Developer Tools → YAML → Check and reload** before full container restart.
+- **Monitor `docker logs` for 60 seconds after any restart.** Look for `ERROR` or `recovery mode` messages.
+
+### Safe reload script
+```bash
+# File: scripts/ha_safe_reload.sh
+# Usage: ./scripts/ha_safe_reload.sh
+# Steps: validate YAML → check HA health → restart container
+```
+
+### Pre-commit hook
+```bash
+# File: .git/hooks/pre-commit
+# Validates all staged .yaml files via yaml.safe_load()
+# Blocks commit if any file has syntax errors
+```
+
 ## agent-browser CLI
 
 `agent-browser` is installed system-wide (brew) and is the preferred tool for UI verification and frontend automation.

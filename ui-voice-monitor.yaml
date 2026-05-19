@@ -73,3 +73,31 @@ views:
           - entity: input_number.wake_word_sensitivity
         hours_to_show: 24
         refresh_interval: 0
+
+      - type: entities
+        title: Latency Metrics
+        entities:
+          - entity: sensor.pipeline_total_latency
+            name: Total
+          - entity: sensor.pipeline_total_latency
+            name: STT
+            attribute: stt_latency
+          - entity: sensor.pipeline_total_latency
+            name: LLM
+            attribute: llm_latency
+          - entity: sensor.llm_provider_health
+            name: LLM Provider
+        show_header_toggle: false
+
+      - type: history-graph
+        title: Pipeline Latency (last 24h)
+        entities:
+          - entity: sensor.pipeline_total_latency
+          - entity: sensor.pipeline_total_latency
+            name: stt
+            attribute: stt_latency
+          - entity: sensor.pipeline_total_latency
+            name: llm
+            attribute: llm_latency
+        hours_to_show: 24
+        refresh_interval: 0

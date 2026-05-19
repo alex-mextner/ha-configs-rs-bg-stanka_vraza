@@ -48,7 +48,11 @@ automation:
         target:
           entity_id: input_text.conversation_history
         data:
-          value: "{{ states('input_text.conversation_history') }}\n[{{ now().strftime('%H:%M') }}] {{ states('input_text.last_voice_request') }} -> {{ trigger.event.data.new_state.state }}" | trim
+          value: >
+            {% set hist = states('input_text.conversation_history') | default('') %}
+            {% set req = states('input_text.last_voice_request') | default('(unknown)') %}
+            {% set resp = trigger.event.data.new_state.state | default('(no response)') %}
+            {{ [hist, '[' ~ now().strftime('%H:%M') ~ '] ' ~ req ~ ' -> ' ~ resp] | select('defined') | join('\n') | trim }}
     mode: single
 
   - id: voice_log_request
