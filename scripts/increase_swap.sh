@@ -2,6 +2,10 @@
 # increase_swap.sh — Add or expand swap file safely
 # Usage: sudo ./scripts/increase_swap.sh [SIZE]
 #   SIZE: swap size with unit, e.g. 16G, 32G, 8G (default: 16G)
+#
+# SAFETY: This script NEVER calls swapoff on a heavily-used swap.
+# If the old swap contains >500 MB of data, it recommends reboot
+# instead of triggering swap-thrashing.
 
 set -euo pipefail
 
@@ -81,19 +85,69 @@ else
     echo "  OK: Added $SWAP_FILE to /etc/fstab."
 fi
 
-# Optionally disable old small swap
+# --- SAFE OLD SWAP REMOVAL ---
 echo ""
 if [ -f "$OLD_SWAP" ] && swapon --show=NAME | grep -q "^$OLD_SWAP"; then
-    echo "Old swap $OLD_SWAP is still active."
-    read -r -p "Disable and remove old $OLD_SWAP? [y/N] " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        swapoff "$OLD_SWAP"
-        rm -f "$OLD_SWAP"
-        sed -i "/swap.img/d" /etc/fstab
-        echo "  OK: Old swap removed."
+    OLD_USED=$(swapon --bytes --show=USED,NAME | awk -v f="$OLD_SWAP" '$2==f {print $1}')
+    OLD_USED_MB=$((OLD_USED / 1024 / 1024))
+    echo "Old swap $OLD_SWAP is still active and contains ${OLD_USED_MB} MB of data."
+
+    if [ "$OLD_USED_MB" -gt 500 ]; then
+        echo ""
+        echo "======================================================================"
+        echo "WARNING: Old swap contains ${OLD_USED_MB} MB (> 500 MB)."
+        echo "Disabling it now would force the kernel to move data back to RAM,"
+        echo "causing severe swap-thrashing and system freeze (several minutes)."
+        echo ""
+        echo "RECOMMENDED SAFE OPTIONS:"
+        echo "  1) REBOOT  — safest. New swap will be active, old one ignored."
+        echo "              Then manually remove old swap after reboot."
+        echo ""
+        echo "  2) WAIT    — if system is idle, data may naturally migrate out"
+        echo "              of old swap over time. Re-run this script later."
+        echo ""
+        echo "  3) FORCE   — only if you accept the freeze risk."
+        echo "              The system may become unresponsive for 2-10 minutes."
+        echo "======================================================================"
+        echo ""
+        read -r -p "Choose: [1=reboot / 2=wait / 3=force / N=skip] " confirm
+        case "$confirm" in
+            1|reboot)
+                echo "Rebooting in 10 seconds... (Ctrl+C to cancel)"
+                sleep 10
+                reboot
+                ;;
+            2|wait)
+                echo "Kept old swap. Re-run this script later when old swap is emptier."
+                echo "Current command to remove later:"
+                echo "  sudo swapoff $OLD_SWAP && sudo rm $OLD_SWAP && sudo sed -i '/swap.img/d' /etc/fstab"
+                ;;
+            3|force)
+                echo "WARNING: Forcing swapoff. System may freeze for several minutes."
+                echo "Starting in 10 seconds... (Ctrl+C to cancel)"
+                sleep 10
+                swapoff "$OLD_SWAP"
+                rm -f "$OLD_SWAP"
+                sed -i "/swap.img/d" /etc/fstab
+                echo "  OK: Old swap removed."
+                ;;
+            *)
+                echo "Skipped. Kept old swap."
+                echo "To remove later: sudo swapoff $OLD_SWAP && sudo rm $OLD_SWAP"
+                ;;
+        esac
     else
-        echo "  Kept old swap. You can remove it later with:"
-        echo "    sudo swapoff $OLD_SWAP && sudo rm $OLD_SWAP"
+        echo "Old swap is nearly empty (${OLD_USED_MB} MB). Safe to disable."
+        read -r -p "Disable and remove old $OLD_SWAP? [y/N] " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            swapoff "$OLD_SWAP"
+            rm -f "$OLD_SWAP"
+            sed -i "/swap.img/d" /etc/fstab
+            echo "  OK: Old swap removed."
+        else
+            echo "  Kept old swap. You can remove it later with:"
+            echo "    sudo swapoff $OLD_SWAP && sudo rm $OLD_SWAP && sudo sed -i '/swap.img/d' /etc/fstab"
+        fi
     fi
 fi
 
