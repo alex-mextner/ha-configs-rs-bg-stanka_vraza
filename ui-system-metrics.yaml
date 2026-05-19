@@ -255,3 +255,36 @@ views:
                 value: ""
             show_icon: true
             icon: mdi:delete-sweep
+
+          - type: entities
+            title: Last Interaction
+            entities:
+              - entity: sensor.last_stt_transcript
+                name: Last Command
+              - entity: sensor.last_tts_response
+                name: Last Response
+            show_header_toggle: false
+
+          - type: history-graph
+            title: Sensitivity Changes (24h)
+            entities:
+              - entity: input_number.wake_word_sensitivity
+            hours_to_show: 24
+            refresh_interval: 0
+
+      - type: vertical-stack
+        cards:
+          - type: horizontal-stack
+            cards:
+              - type: button
+                name: Stop Listening
+                tap_action:
+                  action: call-service
+                  service: shell_command.voice_stop_recording
+                icon: mdi:microphone-off
+              - type: button
+                name: Start Listening
+                tap_action:
+                  action: call-service
+                  service: shell_command.voice_start_recording
+                icon: mdi:microphone

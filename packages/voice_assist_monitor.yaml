@@ -46,6 +46,11 @@ input_boolean:
     icon: mdi:record-rec
     initial: true
 
+  tv_noise_mode:
+    name: "TV Noise Mode"
+    icon: mdi:television-speaker
+    initial: false
+
 # ── Latency tracking timestamps ──
 input_datetime:
   pipeline_start_time:
@@ -188,6 +193,7 @@ template:
 # ── Shell commands to restart voice services with new settings ──
 shell_command:
   voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-porcupine1 wyoming-satellite"
+  voice_restart_satellite: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
   voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:1,0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
@@ -300,6 +306,78 @@ automation:
       - service: counter.reset
         target:
           entity_id: counter.wake_word_detections_today
+
+  - id: voice_tv_noise_mode_on
+    alias: "Voice: TV Noise Mode ON"
+    trigger:
+      - platform: state
+        entity_id: media_player.televizor
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.tv_noise_mode
+        state: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.tv_noise_mode
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.mic_noise_suppression
+        data:
+          value: 4
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.mute_after_awake
+        data:
+          value: 2.5
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.wake_word_sensitivity
+        data:
+          value: 0.9
+      - service: notify.persistent_notification
+        data:
+          title: "TV Noise Mode"
+          message: "TV включен. Повышено шумоподавление (NS=4, mute=2.5s, sensitivity=0.9). Перезапуск voice services..."
+      - service: shell_command.voice_restart_services
+    mode: single
+
+  - id: voice_tv_noise_mode_off
+    alias: "Voice: TV Noise Mode OFF"
+    trigger:
+      - platform: state
+        entity_id: media_player.televizor
+        to: "off"
+    condition:
+      - condition: state
+        entity_id: input_boolean.tv_noise_mode
+        state: "on"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.tv_noise_mode
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.mic_noise_suppression
+        data:
+          value: 3
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.mute_after_awake
+        data:
+          value: 1.5
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.wake_word_sensitivity
+        data:
+          value: 0.7
+      - service: notify.persistent_notification
+        data:
+          title: "TV Noise Mode"
+          message: "TV выключен. Возвращены стандартные настройки voice. Перезапуск voice services..."
+      - service: shell_command.voice_restart_services
+    mode: single
 
 # ── Command line sensor: container health ──
 command_line:
