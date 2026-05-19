@@ -17,7 +17,7 @@ input_text:
   conversation_history:
     name: "Conversation History"
     icon: mdi:history
-    max: 1024
+    max: 255
     initial: ""
 
 input_boolean:

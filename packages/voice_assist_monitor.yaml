@@ -306,14 +306,14 @@ command_line:
   - sensor:
       name: "Wyoming Satellite Health"
       unique_id: wyoming_satellite_health
-      command: "docker ps | grep homeassistant-wyoming-satellite-1 | grep -q Up && echo running || echo stopped"
+      command: "nc -z wyoming-satellite 10700 && echo running || echo stopped"
       scan_interval: 30
       value_template: "{{ value }}"
 
   - sensor:
       name: "Wyoming Porcupine1 Health"
       unique_id: wyoming_porcupine1_health
-      command: "docker ps | grep homeassistant-wyoming-porcupine1-1 | grep -q Up && echo running || echo stopped"
+      command: "nc -z wyoming-porcupine1 10400 && echo running || echo stopped"
       scan_interval: 30
       value_template: "{{ value }}"
 
