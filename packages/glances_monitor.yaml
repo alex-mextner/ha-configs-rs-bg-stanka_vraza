@@ -1,0 +1,214 @@
+# Glances Monitor Package
+# Fetches extended system metrics from local Glances API
+# Glances runs on host: http://172.17.0.1:61208 (Docker bridge gateway)
+
+sensor:
+  - platform: rest
+    name: Glances CPU Total
+    resource: http://172.17.0.1:61208/api/4/cpu
+    value_template: "{{ value_json.total | float(0) | round(1) }}"
+    unit_of_measurement: "%"
+    scan_interval: 60
+    unique_id: glances_cpu_total
+
+  - platform: rest
+    name: Glances CPU User
+    resource: http://172.17.0.1:61208/api/4/cpu
+    value_template: "{{ value_json.user | float(0) | round(1) }}"
+    unit_of_measurement: "%"
+    scan_interval: 60
+    unique_id: glances_cpu_user
+
+  - platform: rest
+    name: Glances CPU System
+    resource: http://172.17.0.1:61208/api/4/cpu
+    value_template: "{{ value_json.system | float(0) | round(1) }}"
+    unit_of_measurement: "%"
+    scan_interval: 60
+    unique_id: glances_cpu_system
+
+  - platform: rest
+    name: Glances CPU IOWait
+    resource: http://172.17.0.1:61208/api/4/cpu
+    value_template: "{{ value_json.iowait | float(0) | round(1) }}"
+    unit_of_measurement: "%"
+    scan_interval: 60
+    unique_id: glances_cpu_iowait
+
+  - platform: rest
+    name: Glances Memory Percent
+    resource: http://172.17.0.1:61208/api/4/mem
+    value_template: "{{ value_json.percent | float(0) | round(1) }}"
+    unit_of_measurement: "%"
+    scan_interval: 60
+    unique_id: glances_mem_percent
+
+  - platform: rest
+    name: Glances Memory Used
+    resource: http://172.17.0.1:61208/api/4/mem
+    value_template: "{{ (value_json.used / 1073741824) | round(1) }}"
+    unit_of_measurement: "GiB"
+    scan_interval: 60
+    unique_id: glances_mem_used
+
+  - platform: rest
+    name: Glances Memory Available
+    resource: http://172.17.0.1:61208/api/4/mem
+    value_template: "{{ (value_json.available / 1073741824) | round(1) }}"
+    unit_of_measurement: "GiB"
+    scan_interval: 60
+    unique_id: glances_mem_available
+
+  - platform: rest
+    name: Glances Swap Percent
+    resource: http://172.17.0.1:61208/api/4/memswap
+    value_template: "{{ value_json.percent | float(0) | round(1) }}"
+    unit_of_measurement: "%"
+    scan_interval: 60
+    unique_id: glances_swap_percent
+
+  - platform: rest
+    name: Glances Load 1m
+    resource: http://172.17.0.1:61208/api/4/load
+    value_template: "{{ value_json.min1 | float(0) | round(2) }}"
+    unit_of_measurement: ""
+    scan_interval: 60
+    unique_id: glances_load_1m
+
+  - platform: rest
+    name: Glances Load 5m
+    resource: http://172.17.0.1:61208/api/4/load
+    value_template: "{{ value_json.min5 | float(0) | round(2) }}"
+    unit_of_measurement: ""
+    scan_interval: 60
+    unique_id: glances_load_5m
+
+  - platform: rest
+    name: Glances Load 15m
+    resource: http://172.17.0.1:61208/api/4/load
+    value_template: "{{ value_json.min15 | float(0) | round(2) }}"
+    unit_of_measurement: ""
+    scan_interval: 60
+    unique_id: glances_load_15m
+
+  - platform: rest
+    name: Glances Processes Running
+    resource: http://172.17.0.1:61208/api/4/processcount
+    value_template: "{{ value_json.running | int(0) }}"
+    unit_of_measurement: ""
+    scan_interval: 300
+    unique_id: glances_process_running
+
+  - platform: rest
+    name: Glances Processes Total
+    resource: http://172.17.0.1:61208/api/4/processcount
+    value_template: "{{ value_json.total | int(0) }}"
+    unit_of_measurement: ""
+    scan_interval: 300
+    unique_id: glances_process_total
+
+template:
+  - sensor:
+      - name: "Glances System Summary"
+        unique_id: glances_system_summary
+        state: >
+          {% set cpu = states('sensor.glances_cpu_total') | float(0) %}
+          {% set ram = states('sensor.glances_memory_percent') | float(0) %}
+          {% set swap = states('sensor.glances_swap_percent') | float(0) %}
+          {% set iowait = states('sensor.glances_cpu_iowait') | float(0) %}
+          {% if cpu > 90 or ram > 90 or swap > 95 or iowait > 20 %}
+            critical
+          {% elif cpu > 80 or ram > 85 or swap > 90 or iowait > 10 %}
+            warning
+          {% else %}
+            normal
+          {% endif %}
+        attributes:
+          cpu_percent: "{{ states('sensor.glances_cpu_total') | float(0) }}"
+          ram_percent: "{{ states('sensor.glances_memory_percent') | float(0) }}"
+          swap_percent: "{{ states('sensor.glances_swap_percent') | float(0) }}"
+          iowait_percent: "{{ states('sensor.glances_cpu_iowait') | float(0) }}"
+          load_15m: "{{ states('sensor.glances_load_15m') | float(0) }}"
+
+  - binary_sensor:
+      - name: "Glances High IO Wait"
+        unique_id: glances_high_iowait
+        device_class: problem
+        state: "{{ states('sensor.glances_cpu_iowait') | float(0) > 15 }}"
+
+      - name: "Glances High CPU"
+        unique_id: glances_high_cpu
+        device_class: problem
+        state: "{{ states('sensor.glances_cpu_total') | float(0) > 80 }}"
+
+      - name: "Glances High RAM"
+        unique_id: glances_high_ram
+        device_class: problem
+        state: "{{ states('sensor.glances_memory_percent') | float(0) > 85 }}"
+
+      - name: "Glances High Swap"
+        unique_id: glances_high_swap
+        device_class: problem
+        state: "{{ states('sensor.glances_swap_percent') | float(0) > 90 }}"
+
+automation:
+  - alias: "Glances Monitor: High IO Wait Alert"
+    id: glances_alert_iowait
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.glances_cpu_iowait
+        above: 15
+        for:
+          minutes: 3
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Высокий IO Wait"
+          message: "IO Wait: {{ states('sensor.glances_cpu_iowait') }}% более 3 минут. Дисковая подсистема перегружена."
+      - service: persistent_notification.create
+        data:
+          title: "High IO Wait"
+          message: "CPU iowait is {{ states('sensor.glances_cpu_iowait') }}% for more than 3 minutes"
+    mode: single
+
+  - alias: "Glances Monitor: High Swap Alert"
+    id: glances_alert_swap
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.glances_swap_percent
+        above: 90
+    action:
+      - service: notify.notify
+        data:
+          title: "🚨 Glances: Критический Swap"
+          message: "Glances показывает swap {{ states('sensor.glances_swap_percent') }}%. Причина прошлого зависания?"
+      - service: persistent_notification.create
+        data:
+          title: "Critical Swap (Glances)"
+          message: "Glances swap usage: {{ states('sensor.glances_swap_percent') }}%"
+    mode: single
+
+  - alias: "Glances Monitor: Recovery"
+    id: glances_recovery
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.glances_high_iowait
+        to: "off"
+        for:
+          minutes: 2
+      - platform: state
+        entity_id: binary_sensor.glances_high_swap
+        to: "off"
+        for:
+          minutes: 2
+    condition:
+      - condition: state
+        entity_id: sensor.glances_system_summary
+        state: "normal"
+    action:
+      - service: notify.notify
+        data:
+          title: "✅ Glances: система восстановлена"
+          message: "CPU {{ states('sensor.glances_cpu_total') }}%, RAM {{ states('sensor.glances_memory_percent') }}%, IO Wait {{ states('sensor.glances_cpu_iowait') }}%"
+    mode: queued
+    max: 3

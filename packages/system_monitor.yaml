@@ -1,0 +1,208 @@
+# System Monitor Package
+# Sensors, thresholds and alerts for host resource monitoring
+# Works via command_line inside HA container (reads host /proc metrics)
+
+command_line:
+  - sensor:
+      name: CPU Usage
+      command: "awk '/^cpu /{u=$2; n=$4; i=$5; t=u+n+i; if(t>0) printf(\"%.0f\", (u+n)*100/t); else print 0}' /proc/stat"
+      unit_of_measurement: "%"
+      scan_interval: 60
+      unique_id: system_monitor_cpu_usage
+
+  - sensor:
+      name: Load Average 1m
+      command: "awk '{print $1}' /proc/loadavg"
+      scan_interval: 60
+      unique_id: system_monitor_load_1m
+
+  - sensor:
+      name: Load Average 5m
+      command: "awk '{print $2}' /proc/loadavg"
+      scan_interval: 60
+      unique_id: system_monitor_load_5m
+
+  - sensor:
+      name: Load Average 15m
+      command: "awk '{print $3}' /proc/loadavg"
+      scan_interval: 60
+      unique_id: system_monitor_load_15m
+
+  - sensor:
+      name: Memory Usage Percent
+      command: "free | awk '/Mem/{printf(\"%.0f\", $3/$2 * 100.0)}'"
+      unit_of_measurement: "%"
+      scan_interval: 60
+      unique_id: system_monitor_mem_pct
+
+  - sensor:
+      name: Memory Free MB
+      command: "free -m | awk '/Mem/{print $7}'"
+      unit_of_measurement: "MiB"
+      scan_interval: 60
+      unique_id: system_monitor_mem_free
+
+  - sensor:
+      name: Swap Usage Percent
+      command: "free | awk '/Swap/{if($2>0) printf(\"%.0f\", $3/$2 * 100.0); else print 0}'"
+      unit_of_measurement: "%"
+      scan_interval: 60
+      unique_id: system_monitor_swap_pct
+
+  - sensor:
+      name: Disk Usage Root
+      command: "df / | awk 'NR==2{print $5}' | sed 's/%//'"
+      unit_of_measurement: "%"
+      scan_interval: 300
+      unique_id: system_monitor_disk_root
+
+template:
+  - sensor:
+      - name: "System Status"
+        unique_id: system_monitor_status
+        state: >
+          {% set cpu = states('sensor.cpu_usage') | float(0) %}
+          {% set ram = states('sensor.memory_usage_percent') | float(0) %}
+          {% set swap = states('sensor.swap_usage_percent') | float(0) %}
+          {% set load = states('sensor.load_average_15m') | float(0) %}
+          {% if cpu > 90 or ram > 90 or swap > 95 or load > 12 %}
+            critical
+          {% elif cpu > 80 or ram > 85 or swap > 90 or load > 8 %}
+            warning
+          {% else %}
+            normal
+          {% endif %}
+        attributes:
+          cpu_percent: "{{ states('sensor.cpu_usage') | float(0) }}"
+          ram_percent: "{{ states('sensor.memory_usage_percent') | float(0) }}"
+          swap_percent: "{{ states('sensor.swap_usage_percent') | float(0) }}"
+          load_15m: "{{ states('sensor.load_average_15m') | float(0) }}"
+
+  - binary_sensor:
+      - name: "High CPU Load"
+        unique_id: system_monitor_high_cpu
+        device_class: problem
+        state: "{{ states('sensor.cpu_usage') | float(0) > 80 }}"
+
+      - name: "High RAM Usage"
+        unique_id: system_monitor_high_ram
+        device_class: problem
+        state: "{{ states('sensor.memory_usage_percent') | float(0) > 85 }}"
+
+      - name: "High Swap Usage"
+        unique_id: system_monitor_high_swap
+        device_class: problem
+        state: "{{ states('sensor.swap_usage_percent') | float(0) > 90 }}"
+
+      - name: "High Load Average"
+        unique_id: system_monitor_high_load
+        device_class: problem
+        state: "{{ states('sensor.load_average_15m') | float(0) > 8.0 }}"
+
+automation:
+  - alias: "System Monitor: High CPU Alert"
+    id: system_monitor_alert_cpu
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.cpu_usage
+        above: 80
+        for:
+          minutes: 5
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Высокая загрузка CPU"
+          message: "CPU составляет {{ states('sensor.cpu_usage') }}% более 5 минут. Система может тормозить."
+      - service: persistent_notification.create
+        data:
+          title: "High CPU Load"
+          message: "CPU usage is {{ states('sensor.cpu_usage') }}% for more than 5 minutes"
+    mode: single
+
+  - alias: "System Monitor: High Load Average Alert"
+    id: system_monitor_alert_load
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.load_average_15m
+        above: 8.0
+        for:
+          minutes: 3
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Высокий Load Average"
+          message: "Load 15m: {{ states('sensor.load_average_15m') }} (порог: 8.0). Возможен IO-wait или swap-thrashing."
+      - service: persistent_notification.create
+        data:
+          title: "High Load Average"
+          message: "Load average 15m is {{ states('sensor.load_average_15m') }} (threshold: 8.0)"
+    mode: single
+
+  - alias: "System Monitor: High RAM Alert"
+    id: system_monitor_alert_ram
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.memory_usage_percent
+        above: 85
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Высокое использование RAM"
+          message: "RAM: {{ states('sensor.memory_usage_percent') }}% (свободно {{ states('sensor.memory_free_mb') }} MB). Возможен OOM."
+      - service: persistent_notification.create
+        data:
+          title: "High RAM Usage"
+          message: "Memory usage is {{ states('sensor.memory_usage_percent') }}% (free: {{ states('sensor.memory_free_mb') }} MB)"
+    mode: single
+
+  - alias: "System Monitor: Critical Swap Alert"
+    id: system_monitor_alert_swap
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.swap_usage_percent
+        above: 90
+    action:
+      - service: notify.notify
+        data:
+          title: "🚨 Критический Swap"
+          message: "Swap используется на {{ states('sensor.swap_usage_percent') }}%! Система может жестко зависнуть (thrashing)."
+      - service: persistent_notification.create
+        data:
+          title: "Critical Swap Usage"
+          message: "Swap usage is {{ states('sensor.swap_usage_percent') }}% — system may freeze"
+    mode: single
+
+  - alias: "System Monitor: Recovery Notification"
+    id: system_monitor_recovery
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.high_cpu_load
+        to: "off"
+        for:
+          minutes: 2
+      - platform: state
+        entity_id: binary_sensor.high_ram_usage
+        to: "off"
+        for:
+          minutes: 2
+      - platform: state
+        entity_id: binary_sensor.high_swap_usage
+        to: "off"
+        for:
+          minutes: 2
+      - platform: state
+        entity_id: binary_sensor.high_load_average
+        to: "off"
+        for:
+          minutes: 2
+    condition:
+      - condition: state
+        entity_id: sensor.system_status
+        state: "normal"
+    action:
+      - service: notify.notify
+        data:
+          title: "✅ Система восстановлена"
+          message: "Ресурсы вернулись к норме: CPU {{ states('sensor.cpu_usage') }}%, RAM {{ states('sensor.memory_usage_percent') }}%, Load {{ states('sensor.load_average_15m') }}"
+    mode: queued
+    max: 3
