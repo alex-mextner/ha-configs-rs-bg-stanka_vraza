@@ -66,6 +66,12 @@ input_datetime:
     has_time: true
     icon: mdi:brain
 
+  tts_done_time:
+    name: "TTS Done"
+    has_date: true
+    has_time: true
+    icon: mdi:speaker
+
   last_wake_time:
     name: "Last Wake Time"
     has_date: true
@@ -123,19 +129,41 @@ template:
           {% else %}
             0
           {% endif %}
-        attributes:
-          stt_latency: >
-            {% set start = states('input_datetime.pipeline_start_time') %}
-            {% set end = states('input_datetime.stt_done_time') %}
-            {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
-              {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
-            {% else %}0{% endif %}
-          llm_latency: >
-            {% set start = states('input_datetime.stt_done_time') %}
-            {% set end = states('input_datetime.llm_done_time') %}
-            {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
-              {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
-            {% else %}0{% endif %}
+
+      - name: "STT Latency"
+        unique_id: stt_latency
+        unit_of_measurement: "s"
+        state_class: measurement
+        state: >
+          {% set start = states('input_datetime.pipeline_start_time') %}
+          {% set end = states('input_datetime.stt_done_time') %}
+          {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
+            {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
+          {% else %}0{% endif %}
+
+      - name: "LLM Latency"
+        unique_id: llm_latency
+        unit_of_measurement: "s"
+        state_class: measurement
+        state: >
+          {% set start = states('input_datetime.stt_done_time') %}
+          {% set end = states('input_datetime.llm_done_time') %}
+          {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
+            {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
+          {% else %}0{% endif %}
+
+      - name: "TTS Latency"
+        unique_id: tts_latency
+        unit_of_measurement: "s"
+        state_class: measurement
+        state: >
+          {% set start = states('input_datetime.llm_done_time') %}
+          {% set end = states('input_datetime.tts_done_time') %}
+          {% if start not in ['unknown','unavailable','none',''] and end not in ['unknown','unavailable','none',''] %}
+            {{ ((as_timestamp(end) - as_timestamp(start)) | round(2)) }}
+          {% else %}
+            0
+          {% endif %}
 
       - name: "LLM Provider Health"
         unique_id: llm_provider_health
@@ -143,6 +171,19 @@ template:
           {{ states('conversation.home_generative_agent_2') | default('unknown') }}
         attributes:
           last_response_time: "{{ state_attr('conversation.home_generative_agent_2', 'last_response_time') | default('unknown') }}"
+
+      - name: "Latest Debug Recording"
+        unique_id: latest_debug_recording
+        state: >
+          {% set files = states('sensor.debug_files_list') | default('') %}
+          {% if files %}
+            {{ files.split(',') | last }}
+          {% else %}
+            none
+          {% endif %}
+        attributes:
+          folder: "/home/ultra/wyoming-debug"
+          count: "{{ (states('sensor.debug_files_list') | default('')).split(',') | length }}"
 
 # ── Shell commands to restart voice services with new settings ──
 shell_command:
@@ -194,6 +235,22 @@ automation:
       - service: input_datetime.set_datetime
         target:
           entity_id: input_datetime.llm_done_time
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+    mode: single
+
+  - id: voice_track_tts_done
+    alias: "Voice: Track TTS Done"
+    trigger:
+      - platform: state
+        entity_id: tts.dzharvis_dzharvis
+    condition:
+      - condition: template
+        value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
+    action:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.tts_done_time
         data:
           datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
     mode: single
@@ -255,5 +312,12 @@ command_line:
       name: "Wyoming Porcupine1 Health"
       unique_id: wyoming_porcupine1_health
       command: "docker inspect -f '{{.State.Status}}' homeassistant-wyoming-porcupine1-1 2>/dev/null || echo 'stopped'"
+      scan_interval: 30
+      value_template: "{{ value }}"
+
+  - sensor:
+      name: "Debug Files List"
+      unique_id: debug_files_list
+      command: "ls -1 /home/ultra/wyoming-debug/*.wav 2>/dev/null | sed 's|/home/ultra/wyoming-debug/||' | paste -sd ',' - || echo ''"
       scan_interval: 30
       value_template: "{{ value }}"

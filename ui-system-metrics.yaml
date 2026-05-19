@@ -12,13 +12,13 @@ views:
                 name: Status
               - entity: sensor.glances_system_summary
                 name: Glances Status
-              - entity: binary_sensor.high_cpu_load
+              - entity: binary_sensor.system_high_cpu
                 name: CPU High
-              - entity: binary_sensor.high_ram_usage
+              - entity: binary_sensor.system_high_ram
                 name: RAM High
-              - entity: binary_sensor.high_swap_usage
+              - entity: binary_sensor.system_high_swap
                 name: Swap High
-              - entity: binary_sensor.high_load_average
+              - entity: binary_sensor.system_high_load
                 name: Load High
               - entity: binary_sensor.glances_system_problem
                 name: Glances Problem
@@ -124,7 +124,7 @@ views:
             show_header_toggle: false
 
           - type: entities
-            title: Wake Word Stats
+            title: Wake Word Activity
             entities:
               - entity: sensor.last_wake_word
                 name: Last Detection
@@ -135,15 +135,38 @@ views:
             show_header_toggle: false
 
           - type: history-graph
-            title: Latency (24h)
+            title: Latency Breakdown (24h)
             entities:
               - entity: sensor.pipeline_total_latency
                 name: Total
+              - entity: sensor.stt_latency
+                name: STT
+              - entity: sensor.llm_latency
+                name: LLM
+              - entity: sensor.tts_latency
+                name: TTS
+            hours_to_show: 24
+            refresh_interval: 0
+
+          - type: history-graph
+            title: Wake Detections per Hour (24h)
+            entities:
+              - entity: counter.wake_word_detections_today
             hours_to_show: 24
             refresh_interval: 0
 
       - type: vertical-stack
         cards:
+          - type: entities
+            title: Current Voice Settings (Read-only)
+            entities:
+              - entity: sensor.wyoming_porcupine1_health
+                name: Porcupine1 Sensitivity
+                attribute: sensitivity
+              - entity: sensor.wyoming_satellite_health
+                name: Satellite Status
+            show_header_toggle: false
+
           - type: entities
             title: Live Tuning
             entities:
@@ -167,9 +190,15 @@ views:
             show_icon: true
             icon: mdi:restart
 
-          - type: history-graph
-            title: Sensitivity History (24h)
+          - type: entities
+            title: Debug Recordings
             entities:
-              - entity: input_number.wake_word_sensitivity
-            hours_to_show: 24
-            refresh_interval: 0
+              - entity: sensor.latest_debug_recording
+                name: Latest File
+            show_header_toggle: false
+
+          - type: markdown
+            content: |
+              **Debug recordings:** `/home/ultra/wyoming-debug/`  
+              Use `aplay` or copy to PC to listen.  
+              Files: `*-wake.wav` (2s before wake), `*-stt.wav` (command audio).
