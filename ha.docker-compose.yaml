@@ -17,7 +17,9 @@ services:
       retries: 3
       start_period: 120s
     networks:
-      - ha-net
+      ha-net:
+        aliases:
+          - homeassistant.local
 
   esphome:
     image: ghcr.io/esphome/esphome:latest
@@ -70,7 +72,16 @@ services:
 
   wyoming-openwakeword:
     image: rhasspy/wyoming-openwakeword
-    command: --preload-model 'hey_jarvis' --threshold 0.6 --debug
+    command:
+      - --preload-model
+      - hey_jarvis
+      - --threshold
+      - "0.85"
+      - --trigger-level
+      - "4"
+      - --refractory-seconds
+      - "3"
+      - --debug
     ports:
       - "10400:10400"
     restart: unless-stopped
@@ -122,6 +133,9 @@ services:
         "--wake-word-name", "hey_jarvis",
         "--detection-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
         "--tts-played-command", "aplay -D plughw:1,0 /app/sounds/done.wav",
+        "--mic-noise-suppression", "3",
+        "--mic-auto-gain", "15",
+        "--mic-seconds-to-mute-after-awake-wav", "1.5",
         "--no-zeroconf", "--debug", "--debug-recording-dir", "/tmp/debug",
       ]
     restart: unless-stopped
