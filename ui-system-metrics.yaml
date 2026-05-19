@@ -158,16 +158,6 @@ views:
       - type: vertical-stack
         cards:
           - type: entities
-            title: Current Voice Settings (Read-only)
-            entities:
-              - entity: sensor.wyoming_porcupine1_health
-                name: Porcupine1 Sensitivity
-                attribute: sensitivity
-              - entity: sensor.wyoming_satellite_health
-                name: Satellite Status
-            show_header_toggle: false
-
-          - type: entities
             title: Live Tuning
             entities:
               - entity: input_number.wake_word_sensitivity
@@ -178,6 +168,8 @@ views:
                 name: Auto Gain
               - entity: input_number.mute_after_awake
                 name: Mute After Awake
+              - entity: input_boolean.voice_pipeline_paused
+                name: Pause Pipeline
             show_header_toggle: false
 
           - type: button
@@ -228,24 +220,14 @@ views:
 
       - type: vertical-stack
         cards:
-          - type: entities
-            title: Real-time Conversation
-            entities:
-              - entity: input_text.last_voice_request
-                name: Last Request
-              - entity: input_text.last_voice_response
-                name: Last Response
-              - entity: input_boolean.voice_pipeline_paused
-                name: Pause / Stop
-            show_header_toggle: false
-
           - type: markdown
+            title: Pipeline Log
             content: |
-              **History:**
+              **Recent stages:**
               {{ states('input_text.conversation_history') | replace('\n', '<br>') }}
 
           - type: button
-            name: Clear History
+            name: Clear Log
             tap_action:
               action: call-service
               service: input_text.set_value
@@ -255,15 +237,6 @@ views:
                 value: ""
             show_icon: true
             icon: mdi:delete-sweep
-
-          - type: entities
-            title: Last Interaction
-            entities:
-              - entity: sensor.last_stt_transcript
-                name: Last Command
-              - entity: sensor.last_tts_response
-                name: Last Response
-            show_header_toggle: false
 
           - type: history-graph
             title: Sensitivity Changes (24h)

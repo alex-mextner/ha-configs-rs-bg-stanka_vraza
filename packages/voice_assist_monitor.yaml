@@ -112,16 +112,6 @@ template:
         attributes:
           raw_datetime: "{{ states('input_datetime.pipeline_start_time') | default('never') }}"
 
-      - name: "Last STT Transcript"
-        unique_id: last_stt_transcript
-        state: >
-          {{ states('sensor.last_stt_text') | default('—') }}
-
-      - name: "Last TTS Response"
-        unique_id: last_tts_response
-        state: >
-          {{ states('sensor.last_tts_text') | default('—') }}
-
       - name: "Pipeline Total Latency"
         unique_id: pipeline_total_latency
         unit_of_measurement: "s"
@@ -196,8 +186,8 @@ shell_command:
   voice_restart_satellite: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
-  voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:1,0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
-  voice_play_last_stt: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:1,0 $(ls -1t /tmp/debug/*-stt.wav | head -n1)' 2>/dev/null || echo 'failed'"
+  voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:2,0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
+  voice_play_last_stt: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:2,0 $(ls -1t /tmp/debug/*-stt.wav | head -n1)' 2>/dev/null || echo 'failed'"
 
 # ── Automations: latency tracking ──
 automation:
@@ -335,11 +325,11 @@ automation:
         target:
           entity_id: input_number.wake_word_sensitivity
         data:
-          value: 0.9
+          value: 0.4
       - service: notify.persistent_notification
         data:
           title: "TV Noise Mode"
-          message: "TV включен. Повышено шумоподавление (NS=4, mute=2.5s, sensitivity=0.9). Перезапуск voice services..."
+          message: "TV включен. Шумоподавление NS=4, mute=2.5s, sensitivity=0.4 (менее чувствительно к ложным срабатываниям). Перезапуск voice services..."
       - service: shell_command.voice_restart_services
     mode: single
 

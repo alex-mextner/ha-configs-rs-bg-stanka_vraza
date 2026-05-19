@@ -2,18 +2,6 @@
 # Tracks last request, response, and provides stop/pause control
 
 input_text:
-  last_voice_request:
-    name: "Last Voice Request"
-    icon: mdi:microphone-message
-    max: 255
-    initial: ""
-
-  last_voice_response:
-    name: "Last Voice Response"
-    icon: mdi:message-reply-text
-    max: 255
-    initial: ""
-
   conversation_history:
     name: "Conversation History"
     icon: mdi:history
@@ -27,51 +15,26 @@ input_boolean:
     initial: false
 
 automation:
-  - id: voice_log_conversation
-    alias: "Voice: Log Conversation"
+  - id: voice_log_pipeline_stages
+    alias: "Voice: Log Pipeline Stages"
     trigger:
-      - platform: event
-        event_type: state_changed
+      - platform: state
+        entity_id: assist_satellite.jarvis
     condition:
       - condition: template
-        value_template: "{{ trigger.event.data.entity_id == 'conversation.home_generative_agent_2' and trigger.event.data.new_state.state != trigger.event.data.old_state.state }}"
+        value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
       - condition: state
         entity_id: input_boolean.voice_pipeline_paused
         state: "off"
     action:
-      - service: input_text.set_value
-        target:
-          entity_id: input_text.last_voice_response
-        data:
-          value: "{{ trigger.event.data.new_state.state }}"
       - service: input_text.set_value
         target:
           entity_id: input_text.conversation_history
         data:
           value: >
             {% set hist = states('input_text.conversation_history') | default('') %}
-            {% set req = states('input_text.last_voice_request') | default('(unknown)') %}
-            {% set resp = trigger.event.data.new_state.state | default('(no response)') %}
-            {{ [hist, '[' ~ now().strftime('%H:%M') ~ '] ' ~ req ~ ' -> ' ~ resp] | select('defined') | join('\n') | trim }}
-    mode: single
-
-  - id: voice_log_request
-    alias: "Voice: Log Request from STT"
-    trigger:
-      - platform: state
-        entity_id: assist_satellite.jarvis
-        from: "listening"
-        to: "processing"
-    condition:
-      - condition: state
-        entity_id: input_boolean.voice_pipeline_paused
-        state: "off"
-    action:
-      - service: input_text.set_value
-        target:
-          entity_id: input_text.last_voice_request
-        data:
-          value: "{{ states('sensor.last_stt_transcript') | default('(unknown)') }}"
+            {% set line = '[' ~ now().strftime('%H:%M') ~ '] ' ~ trigger.from_state.state ~ ' -> ' ~ trigger.to_state.state %}
+            {{ [hist, line] | select('defined') | join('\n') | trim }}
     mode: single
 
   - id: voice_pause_stop_satellite

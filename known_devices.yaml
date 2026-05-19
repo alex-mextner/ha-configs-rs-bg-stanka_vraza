@@ -180,3 +180,10 @@
   icon:
   picture:
   track: true
+
+'192_168_0_37':
+  name: 192.168.0.37
+  mac: AA:8A:57:97:2E:16
+  icon:
+  picture:
+  track: true
