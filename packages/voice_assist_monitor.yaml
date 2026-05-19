@@ -66,6 +66,19 @@ input_datetime:
     has_time: true
     icon: mdi:brain
 
+  last_wake_time:
+    name: "Last Wake Time"
+    has_date: true
+    has_time: true
+    icon: mdi:ear-hearing
+
+counter:
+  wake_word_detections_today:
+    name: "Wake Detections Today"
+    icon: mdi:counter
+    initial: 0
+    step: 1
+
 # ── Template sensors for pipeline state & latency ──
 template:
   - sensor:
@@ -210,6 +223,24 @@ automation:
         data:
           name: "Wake Word"
           message: "Detected at {{ trigger.to_state.state }} (pipeline started)"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.last_wake_time
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - service: counter.increment
+        target:
+          entity_id: counter.wake_word_detections_today
+
+  - id: voice_reset_counter
+    alias: "Voice: Reset Daily Wake Counter"
+    trigger:
+      - platform: time
+        at: "00:00:00"
+    action:
+      - service: counter.reset
+        target:
+          entity_id: counter.wake_word_detections_today
 
 # ── Command line sensor: container health ──
 command_line:

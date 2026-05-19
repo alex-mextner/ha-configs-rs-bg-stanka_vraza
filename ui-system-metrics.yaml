@@ -1,0 +1,175 @@
+title: System & Metrics
+views:
+  - title: Overview
+    path: overview
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: System Health
+            entities:
+              - entity: sensor.system_status
+                name: Status
+              - entity: sensor.glances_system_summary
+                name: Glances Status
+              - entity: binary_sensor.high_cpu_load
+                name: CPU High
+              - entity: binary_sensor.high_ram_usage
+                name: RAM High
+              - entity: binary_sensor.high_swap_usage
+                name: Swap High
+              - entity: binary_sensor.high_load_average
+                name: Load High
+              - entity: binary_sensor.glances_system_problem
+                name: Glances Problem
+            show_header_toggle: false
+
+          - type: history-graph
+            title: CPU & Load (24h)
+            entities:
+              - entity: sensor.cpu_usage
+                name: CPU
+              - entity: sensor.load_average_1m
+                name: Load 1m
+              - entity: sensor.load_average_5m
+                name: Load 5m
+              - entity: sensor.load_average_15m
+                name: Load 15m
+            hours_to_show: 24
+            refresh_interval: 0
+
+          - type: history-graph
+            title: Memory (24h)
+            entities:
+              - entity: sensor.memory_usage_percent
+                name: RAM %
+              - entity: sensor.memory_free_mb
+                name: RAM Free
+              - entity: sensor.swap_usage_percent
+                name: Swap %
+            hours_to_show: 24
+            refresh_interval: 0
+
+          - type: history-graph
+            title: Disk (24h)
+            entities:
+              - entity: sensor.disk_usage_root
+                name: Root
+            hours_to_show: 24
+            refresh_interval: 0
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Glances Detail
+            entities:
+              - entity: sensor.glances_cpu_total
+                name: CPU Total
+              - entity: sensor.glances_cpu_user
+                name: CPU User
+              - entity: sensor.glances_cpu_system
+                name: CPU System
+              - entity: sensor.glances_cpu_iowait
+                name: CPU IO Wait
+              - entity: sensor.glances_memory_percent
+                name: RAM %
+              - entity: sensor.glances_memory_available
+                name: RAM Available
+              - entity: sensor.glances_swap_percent
+                name: Swap %
+              - entity: sensor.glances_load_1m
+                name: Load 1m
+              - entity: sensor.glances_load_5m
+                name: Load 5m
+              - entity: sensor.glances_load_15m
+                name: Load 15m
+            show_header_toggle: false
+
+          - type: history-graph
+            title: Glances CPU & IO Wait (24h)
+            entities:
+              - entity: sensor.glances_cpu_total
+                name: CPU
+              - entity: sensor.glances_cpu_iowait
+                name: IO Wait
+            hours_to_show: 24
+            refresh_interval: 0
+
+          - type: history-graph
+            title: Glances Memory & Swap (24h)
+            entities:
+              - entity: sensor.glances_memory_percent
+                name: RAM %
+              - entity: sensor.glances_swap_percent
+                name: Swap %
+            hours_to_show: 24
+            refresh_interval: 0
+
+  - title: Voice
+    path: voice
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Voice Pipeline Health
+            entities:
+              - entity: sensor.wyoming_satellite_health
+                name: Satellite
+              - entity: sensor.wyoming_porcupine1_health
+                name: Porcupine1
+              - entity: sensor.llm_provider_health
+                name: LLM Provider
+              - entity: sensor.voice_pipeline_stage
+                name: Pipeline Stage
+            show_header_toggle: false
+
+          - type: entities
+            title: Wake Word Stats
+            entities:
+              - entity: sensor.last_wake_word
+                name: Last Detection
+              - entity: input_datetime.last_wake_time
+                name: Last Wake Time
+              - entity: counter.wake_word_detections_today
+                name: Detections Today
+            show_header_toggle: false
+
+          - type: history-graph
+            title: Latency (24h)
+            entities:
+              - entity: sensor.pipeline_total_latency
+                name: Total
+            hours_to_show: 24
+            refresh_interval: 0
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Live Tuning
+            entities:
+              - entity: input_number.wake_word_sensitivity
+                name: Sensitivity
+              - entity: input_number.mic_noise_suppression
+                name: Noise Suppression
+              - entity: input_number.mic_auto_gain
+                name: Auto Gain
+              - entity: input_number.mute_after_awake
+                name: Mute After Awake
+            show_header_toggle: false
+
+          - type: button
+            name: Restart Voice Services
+            tap_action:
+              action: call-service
+              service: shell_command.voice_restart_services
+            hold_action:
+              action: none
+            show_icon: true
+            icon: mdi:restart
+
+          - type: history-graph
+            title: Sensitivity History (24h)
+            entities:
+              - entity: input_number.wake_word_sensitivity
+            hours_to_show: 24
+            refresh_interval: 0

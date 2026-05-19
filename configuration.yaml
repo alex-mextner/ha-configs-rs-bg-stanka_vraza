@@ -132,3 +132,9 @@ lovelace:
       icon: mdi:microphone
       show_in_sidebar: true
       filename: ui-voice-monitor.yaml
+    system-metrics:
+      mode: yaml
+      title: System & Metrics
+      icon: mdi:chart-line
+      show_in_sidebar: true
+      filename: ui-system-metrics.yaml
