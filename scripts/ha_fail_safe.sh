@@ -13,7 +13,23 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
 }
 
-DATAPLICITY_URL="${DATAPLICITY_URL:-https://spry-gazelle-4693.dataplicity.io/}"
+get_dataplicity_url() {
+    local config_file="/home/ultra/homeassistant/.storage/core.config"
+    if [ -f "$config_file" ]; then
+        local url=$(python3 -c "import json; data=json.load(open('$config_file')); print(data.get('data', {}).get('external_url', ''))" 2>/dev/null || echo "")
+        if [ -n "$url" ] && echo "$url" | grep -q "dataplicity"; then
+            echo "$url"
+            return 0
+        fi
+    fi
+    echo ""
+}
+
+DATAPLICITY_URL="${DATAPLICITY_URL:-$(get_dataplicity_url)}"
+if [ -z "$DATAPLICITY_URL" ]; then
+    log "⚠ Could not determine Dataplicity URL from core.config"
+    DATAPLICITY_URL="https://shuddery-wren-6033.dataplicity.io/"
+fi
 
 check_ha() {
     local url="${HA_URL:-http://localhost:8123}"
@@ -50,12 +66,19 @@ check_dataplicity() {
 }
 
 fix_dataplicity() {
+    # Anti-flap: skip if HA was restarted < 10 min ago
+    local uptime_sec=$(docker inspect --format='{{.State.StartedAt}}' homeassistant-homeassistant-1 2>/dev/null | xargs -I{} python3 -c "import datetime,sys; d=datetime.datetime.fromisoformat('{}'.replace('Z','+00:00')); print(int((datetime.datetime.now(datetime.timezone.utc)-d).total_seconds()))")
+    if [ -n "$uptime_sec" ] && [ "$uptime_sec" -lt 600 ]; then
+        log "⚠ HA container up only ${uptime_sec}s (< 10 min), skipping dataplicity restart to prevent loop"
+        return 1
+    fi
+
     log "Attempting to fix dataplicity tunnel (will restart HA container)..."
     restart_ha
     local result=$?
     if [ $result -eq 0 ]; then
-        log "Waiting 30s for dataplicity m2m to reconnect..."
-        sleep 30
+        log "Waiting 90s for dataplicity m2m to reconnect..."
+        sleep 90
         if check_dataplicity; then
             log "✓ Dataplicity tunnel recovered after restart"
             return 0

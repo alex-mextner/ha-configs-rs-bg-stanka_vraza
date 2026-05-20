@@ -158,6 +158,14 @@ After `docker restart homeassistant-homeassistant-1`, the dataplicity m2m tunnel
 and resolves automatically within ~30–60 seconds once the HA container is `healthy`.
 If it persists, run `./scripts/ha_fail_safe.sh fix-dataplicity` (or simply restart HA again).
 
+**⚠️ Restart loop prevention (2026-05-20 incident):**
+The fail-safe cron job (`*/5 * * * *`) previously had a **hardcoded wrong Dataplicity URL**,
+which caused it to fail every 5 minutes and restart HA in an infinite loop. This broke the
+actual m2m tunnel. The script was fixed to read the URL dynamically from `.storage/core.config`.
+Anti-flap guards were added: the script now refuses to restart HA if the container has been up
+for less than 10 minutes. If you manually restart HA multiple times in quick succession,
+Dataplicity may need **10+ minutes** to recover — do not keep restarting.
+
 **Access HA API:**
 - Token stored in `~/.env` as `HA_TOKEN`
 - Base URL: `http://localhost:8123/api`
