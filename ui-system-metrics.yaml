@@ -172,6 +172,24 @@ views:
                 name: Pause Pipeline
             show_header_toggle: false
 
+          - type: entities
+            title: TV Noise Mode
+            entities:
+              - entity: input_boolean.tv_noise_mode
+                name: TV Mode Active
+              - entity: media_player.televizor
+                name: TV State
+            show_header_toggle: false
+
+          - type: entities
+            title: Last Interaction
+            entities:
+              - entity: input_text.last_voice_request
+                name: Last Request
+              - entity: input_text.last_voice_response
+                name: Last Response
+            show_header_toggle: false
+
           - type: button
             name: Restart Voice Services
             tap_action:

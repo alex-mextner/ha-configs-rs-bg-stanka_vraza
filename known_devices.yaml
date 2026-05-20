@@ -187,3 +187,24 @@
   icon:
   picture:
   track: true
+
+'192_168_0_39_2':
+  name: 192.168.0.39
+  mac: D8:BB:C1:73:3B:D5
+  icon:
+  picture:
+  track: true
+
+'192_168_0_38':
+  name: 192.168.0.38
+  mac: 3C:4E:56:71:EA:ED
+  icon:
+  picture:
+  track: true
+
+'192_168_0_28':
+  name: 192.168.0.28
+  mac: 5E:FF:74:D5:DC:42
+  icon:
+  picture:
+  track: true
