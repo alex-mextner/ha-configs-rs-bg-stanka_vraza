@@ -459,6 +459,20 @@ agent-browser eval "document.title"
 - Use `--session-name ha` to persist cookies across commands.
 - Chain commands with `&&`: `agent-browser open URL && agent-browser snapshot`.
 
+### UI Verification Rule (Config Flow / Options Flow)
+Whenever modifying `config_flow.py`, `feature_subentry_flow.py`, `strings.json`, or any translation files that affect the HA frontend UI:
+1. Restart HA to load changes: `docker restart homeassistant-homeassistant-1`
+2. Open the relevant settings page with `agent-browser`
+3. Take a screenshot or snapshot to verify the visual result
+4. Do not rely on code review alone — selectors render differently in the frontend than they appear in Python
+5. Example workflow:
+```bash
+docker restart homeassistant-homeassistant-1
+sleep 15
+agent-browser --session-name ha open http://localhost:8123/config/integrations/integration/home_generative_agent
+agent-browser screenshot /tmp/hga-options.png
+```
+
 ## Ingress UI mode values
 Valid `ui_mode` values for `hass_ingress` are: `normal`, `replace`, `toolbar`.
 `panel` is **not valid** and will cause the ingress integration to fail setup, removing all sidebar items.
