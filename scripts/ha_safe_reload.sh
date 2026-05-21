@@ -7,10 +7,17 @@ set -euo pipefail
 echo "=== HA Safe Reload ==="
 echo "Step 1/3: Checking YAML syntax..."
 
-# Validate all YAML files in packages/
+# Validate all YAML files in packages/ using HA container's Python
+# (handles !secret tags that standard PyYAML does not recognise).
 INVALID=0
 for f in packages/*.yaml; do
-    if ! python3 -c "import yaml; yaml.safe_load(open('$f'))" 2>/dev/null; then
+    if ! docker exec homeassistant-homeassistant-1 python3 -c "
+import yaml
+def secret_constructor(loader, node):
+    return '!secret'
+yaml.SafeLoader.add_constructor('!secret', secret_constructor)
+yaml.safe_load(open('/config/$f'))
+" 2>/dev/null; then
         echo "  ERROR: $f — YAML syntax invalid"
         INVALID=1
     fi
@@ -19,7 +26,6 @@ done
 if [ "$INVALID" -eq 1 ]; then
     echo ""
     echo "ABORTED: Fix YAML errors before reloading HA."
-    echo "Use: python3 -c \"import yaml; yaml.safe_load(open('FILE.yaml'))\""
     exit 1
 fi
 echo "  All YAML files valid."
