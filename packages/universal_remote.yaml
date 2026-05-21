@@ -1101,3 +1101,44 @@ automation:
             Samsung IR passback: tv_source synced to
             {{ states('input_text.tv_source') }}
           level: info
+
+  # ===== Chromecast auto source sync =====
+  # When Chromecast is turned on via its own remote (or HDMI-CEC), the TV
+  # automatically switches to the correct HDMI input. We only need to keep
+  # input_text.tv_source in sync — no IR commands required.
+  - alias: Chromecast auto source sync
+    id: chromecast_auto_source_sync
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: media_player.televizor
+        from:
+          - "off"
+          - "unavailable"
+          - "unknown"
+        to:
+          - "on"
+          - "playing"
+          - "paused"
+          - "idle"
+        for: "00:00:30"
+    condition:
+      - condition: template
+        value_template: "{{ states('input_text.tv_source') != 'chromecast' }}"
+      - condition: template
+        value_template: "{{ not is_state('script.vkliuchi_serialy', 'on') }}"
+      - condition: template
+        value_template: "{{ not is_state('script.source_to_chromecast', 'on') }}"
+    action:
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.tv_source
+        data:
+          value: "chromecast"
+      - action: system_log.write
+        data:
+          level: info
+          message: >-
+            Chromecast auto source sync: tv_source set to chromecast
+            (media_player.televizor became {{ trigger.to_state.state }}
+            from {{ trigger.from_state.state }})
