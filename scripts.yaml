@@ -19,6 +19,39 @@ igraj_na_kolonke:
   description: ''
   icon: mdi:speaker-wireless
 vkliuchi_serialy:
+  alias: Включи сериалы
+  mode: single
+  sequence:
+  - if:
+    - condition: template
+      value_template: '{{ states("input_text.tv_source") == "pc" }}'
+    then:
+    - stop: already on pc
+  - action: remote.turn_off
+    target:
+      entity_id: remote.televizor
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_source
+    data: {}
+  - delay:
+      milliseconds: 999
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_right
+    data: {}
+  - delay:
+      milliseconds: 500
+  - action: button.press
+    target:
+      entity_id: button.samsung_tv_ok
+    data: {}
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.tv_source
+    data:
+      value: pc
+vkliuchi_hromkast:
   alias: Включи хромкаст
   mode: single
   sequence:
@@ -48,36 +81,6 @@ vkliuchi_serialy:
       entity_id: input_text.tv_source
     data:
       value: chromecast
-vkliuchi_hromkast:
-  alias: Включи сериалы
-  mode: single
-  sequence:
-  - if:
-    - condition: template
-      value_template: '{{ states("input_text.tv_source") == "pc" }}'
-    then:
-    - stop: already on pc
-  - action: button.press
-    target:
-      entity_id: button.samsung_tv_source
-    data: {}
-  - delay:
-      milliseconds: 999
-  - action: button.press
-    target:
-      entity_id: button.samsung_tv_right
-    data: {}
-  - delay:
-      milliseconds: 500
-  - action: button.press
-    target:
-      entity_id: button.samsung_tv_ok
-    data: {}
-  - action: input_text.set_value
-    target:
-      entity_id: input_text.tv_source
-    data:
-      value: pc
 tv_pause:
   sequence:
   - choose:

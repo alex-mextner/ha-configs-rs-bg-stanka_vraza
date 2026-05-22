@@ -197,7 +197,7 @@ script:
       - if: "{{ states('input_text.tv_source') == 'chromecast' }}"
         then:
           - stop: "already on chromecast"
-      - action: script.vkliuchi_serialy
+      - action: script.vkliuchi_hromkast
 
   source_to_pc:
     alias: Source → pc (idempotent)
@@ -206,7 +206,7 @@ script:
       - if: "{{ states('input_text.tv_source') == 'pc' }}"
         then:
           - stop: "already on pc"
-      - action: script.vkliuchi_hromkast
+      - action: script.vkliuchi_serialy
 
   # App launcher for Chromecast/Google TV.
   app_launch_on_chromecast:
@@ -1126,7 +1126,7 @@ automation:
       - condition: template
         value_template: "{{ states('input_text.tv_source') != 'chromecast' }}"
       - condition: template
-        value_template: "{{ not is_state('script.vkliuchi_serialy', 'on') }}"
+        value_template: "{{ not is_state('script.vkliuchi_hromkast', 'on') }}"
       - condition: template
         value_template: "{{ not is_state('script.source_to_chromecast', 'on') }}"
     action:
