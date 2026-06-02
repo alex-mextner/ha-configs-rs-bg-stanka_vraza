@@ -17,6 +17,10 @@ __pycache__
 coverage.xml
 .ruff_cache
 visualize_graph.py
+*.bak
+*.bak.*
+*.backup
+*.backup.*
 
 
 # Home Assistant runtime data
