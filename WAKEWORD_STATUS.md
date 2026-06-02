@@ -37,11 +37,19 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
 - model list: `['ey_milosh']`
 - satellite client подключился к wake service
 - Home Assistant container не перезапускался
+- continuous raw recorder подключен к тому же channel 0 mic stream через `wakeword_capture_ch0_record.sh`
+- live noise dataset пишется в `/home/ultra/oww-dataset/raw_live/YYYY-MM-DD/HHMMSS.wav`
 
 Offline report по этому кандидату:
 
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/run_report.json`
+
+Real-data collection report:
+
+```bash
+python3 scripts/wakeword_dataset_report.py --json
+```
 
 ## 2. Что изменилось в методике
 
@@ -67,6 +75,8 @@ Offline report по этому кандидату:
   - Added inline STT hard-negative mining: score debug STT candidate windows with a TFLite model, exclude overlap with deterministic STT test windows, and add only high-score windows as train negatives.
   - Threshold sweep now includes high-resolution `0.991..0.999` points for near-saturated models.
 - `scripts/wakeword_torch_to_tflite.py` - прямой конвертер DNN checkpoint -> Keras/TFLite.
+- `scripts/wakeword_capture_ch0_record.sh` + `scripts/wakeword_channel0_tee.py` - live recorder: keeps feeding satellite while writing real mono WAV segments.
+- `scripts/wakeword_dataset_report.py` - reports raw live hours, debug recordings, curated real positives, and false wakes.
 
 ## 3. Важное открытие по данным
 
@@ -347,26 +357,26 @@ Artifacts:
 Ограничения:
 
 1. Нет реальных positive-записей пользователя. Recall сейчас измерен на synthetic Piper voices.
-2. STT negatives взяты sampled windows, а не полным 24h streaming-прогоном.
+2. STT negatives взяты sampled windows, а не полным 7-day streaming-прогоном.
 3. FPR/hour оценен по 1.99s windows; это приближение, не полная имитация `pyopen_wakeword` streaming + refractory.
-4. `raw/` continuous recorder сломан и не дает usable audio.
+4. `raw_live/` recorder включен только 2026-06-02; недельного negative/noise набора еще нет.
 5. GRU16 показал лучшие offline-метрики, но пока не конвертирован и не проверен как TFLite.
 
 ## 6. Следующий цикл
 
 Приоритеты следующей итерации:
 
-1. Live trial 24-48 часов на активной V2 DNN:
+1. Live trial 24-48 часов на активной V2 DNN HNM:
    - считать новые `*-wake.wav` в `/home/ultra/wyoming-debug/`
    - вручную пометить true wake / false wake
    - добавить false wakes в hard negatives
-2. Записать 50-100 реальных positives:
+2. Дать `raw_live/` recorder накопить минимум 7 дней домашнего шума:
+   - проверить рост `/home/ultra/oww-dataset/raw_live/`
+   - считать FPR через full streaming evaluation, а не только sampled windows
+3. Записать 50-100 реальных positives:
    - `эй Милош`
    - `Милош`
    - разные расстояния, шум ТВ, обычная речь
-3. Починить continuous recorder:
-   - текущий `/home/ultra/oww-dataset/raw/` пишет пустые 44-byte WAV
-   - нужен recorder, который реально сохраняет channel 0 PCM
 4. Сделать full streaming evaluation:
    - прогонять `.tflite` через `pyopen_wakeword`
    - учитывать refractory seconds и trigger-level

@@ -128,12 +128,15 @@ services:
       - audio
     volumes:
       - /home/ultra/sounds:/app/sounds
+      - /home/ultra/homeassistant/scripts/wakeword_capture_ch0_record.sh:/app/sounds/wakeword_capture_ch0_record.sh:ro
+      - /home/ultra/homeassistant/scripts/wakeword_channel0_tee.py:/app/sounds/wakeword_channel0_tee.py:ro
       - /home/ultra/wyoming-debug:/tmp/debug
+      - /home/ultra/oww-dataset:/dataset
     command:
       [
         "--name", "Jarvis",
         "--uri", "tcp://0.0.0.0:10700",
-        "--mic-command", "/app/sounds/capture_ch0.sh",
+        "--mic-command", "/app/sounds/wakeword_capture_ch0_record.sh",
         "--snd-command", "aplay -D plughw:1,0 -r 22050 -c 1 -f S16_LE -t raw",
         "--wake-uri", "tcp://wyoming-openwakeword:10400",
         "--wake-word-name", "ey_milosh",
