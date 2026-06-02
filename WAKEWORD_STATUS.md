@@ -77,6 +77,7 @@ python3 scripts/wakeword_dataset_report.py --json
 - `scripts/wakeword_torch_to_tflite.py` - прямой конвертер DNN checkpoint -> Keras/TFLite.
 - `scripts/wakeword_capture_ch0_record.sh` + `scripts/wakeword_channel0_tee.py` - live recorder: keeps feeding satellite while writing real mono WAV segments.
 - `scripts/wakeword_dataset_report.py` - reports raw live hours, debug recordings, curated real positives, and false wakes.
+- `scripts/wakeword_real_positive_session.py` - controlled real-user positive collection from Wyoming `*-wake.wav` files.
 
 ## 3. Важное открытие по данным
 
@@ -377,6 +378,12 @@ Artifacts:
    - `эй Милош`
    - `Милош`
    - разные расстояния, шум ТВ, обычная речь
+   - controlled session:
+     ```bash
+     python3 scripts/wakeword_real_positive_session.py start --phrase "эй Милош" --expected-attempts 50
+     # Say the phrase 50 times near the satellite.
+     python3 scripts/wakeword_real_positive_session.py finish
+     ```
 4. Сделать full streaming evaluation:
    - прогонять `.tflite` через `pyopen_wakeword`
    - учитывать refractory seconds и trigger-level
