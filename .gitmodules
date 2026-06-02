@@ -39,3 +39,6 @@
 [submodule "submodules/hass-music-assistant"]
 	path = submodules/hass-music-assistant
 	url = https://github.com/music-assistant/hass-music-assistant.git
+[submodule "submodules/dhcp-monitor"]
+	path = submodules/dhcp-monitor
+	url = https://github.com/jonnybergdahl/HomeAssistant_Dhcp_Monitor_Integration.git
