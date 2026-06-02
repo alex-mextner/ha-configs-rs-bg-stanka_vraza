@@ -70,13 +70,19 @@ services:
     networks:
       - ha-net
 
-  wyoming-porcupine1:
-    image: rhasspy/wyoming-porcupine1
+  wyoming-openwakeword:
+    image: rhasspy/wyoming-openwakeword
+    volumes:
+      - /home/ultra/oww-models:/custom-models
     command:
       - --uri
       - tcp://0.0.0.0:10400
-      - --sensitivity
-      - "0.5"
+      - --custom-model-dir
+      - /custom-models
+      - --preload-model
+      - ey_milosh
+      - --threshold
+      - "0.97"
       - --debug
     ports:
       - "10400:10400"
@@ -125,8 +131,8 @@ services:
         "--uri", "tcp://0.0.0.0:10700",
         "--mic-command", "/app/sounds/capture_ch0.sh",
         "--snd-command", "aplay -D plughw:1,0 -r 22050 -c 1 -f S16_LE -t raw",
-        "--wake-uri", "tcp://wyoming-porcupine1:10400",
-        "--wake-word-name", "jarvis",
+        "--wake-uri", "tcp://wyoming-openwakeword:10400",
+        "--wake-word-name", "ey_milosh",
         "--detection-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
         "--tts-played-command", "aplay -D plughw:1,0 /app/sounds/done.wav",
         "--mic-noise-suppression", "3",
