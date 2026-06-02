@@ -5,6 +5,7 @@ services:
       - /home/ultra/homeassistant:/config
       - /run/dbus:/run/dbus:ro
       - /etc/localtime:/etc/localtime:ro
+      - /home/ultra/wyoming-debug:/config/wyoming-debug
     ports:
       - "8123:8123"
     restart: unless-stopped

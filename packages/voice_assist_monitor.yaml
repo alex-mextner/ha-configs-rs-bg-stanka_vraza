@@ -398,13 +398,13 @@ command_line:
   - sensor:
       name: "Debug Files List"
       unique_id: debug_files_list
-      command: "ls -1 /home/ultra/wyoming-debug/*.wav 2>/dev/null | sed 's|/home/ultra/wyoming-debug/||' | paste -sd ',' - || echo ''"
+      command: "ls -1 /config/wyoming-debug/*.wav 2>/dev/null | sed 's|/config/wyoming-debug/||' | paste -sd ',' - || echo ''"
       scan_interval: 30
       value_template: "{{ value }}"
 
   - sensor:
       name: "Debug Recording Count"
       unique_id: debug_recording_count
-      command: "ls -1 /home/ultra/wyoming-debug/*.wav 2>/dev/null | wc -l"
+      command: "ls -1 /config/wyoming-debug/*.wav 2>/dev/null | wc -l"
       scan_interval: 30
       value_template: "{{ value | int(0) }}"
