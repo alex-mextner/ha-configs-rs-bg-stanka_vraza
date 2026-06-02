@@ -39,6 +39,19 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
 - Home Assistant container не перезапускался
 - continuous raw recorder подключен к тому же channel 0 mic stream через `wakeword_capture_ch0_record.sh`
 - live noise dataset пишется в `/home/ultra/oww-dataset/raw_live/YYYY-MM-DD/HHMMSS.wav`
+- weekly background-noise recording session started: `/home/ultra/oww-dataset/raw_live_session.json`
+- watchdog cron runs every 15 minutes and sends HA notifications on completion/stall:
+  `*/15 * * * * cd /home/ultra/homeassistant && scripts/wakeword_noise_watchdog.py check >> /tmp/wakeword_noise_watchdog.log 2>&1`
+- HA notification path tested: `persistent_notification.create` and `notify.notify` both returned OK
+- reboot persistence checked:
+  - Docker service is enabled and running
+  - cron service is enabled and running
+  - `wyoming-satellite` and `wyoming-openwakeword` have `restart=unless-stopped`
+- interruption test passed: after `docker compose -f ha.docker-compose.yaml restart wyoming-satellite`, recorder resumed with a new segment and previous WAV files remained readable
+- recorder resilience:
+  - capture wrapper loops forever and restarts the `arecord | tee` pipeline after failures
+  - WAV segments are 60 seconds
+  - WAV headers are refreshed and fsynced every 5 seconds, so abrupt interruption should lose at most the unsynced tail of the current segment, not prior segments
 
 Offline report по этому кандидату:
 
@@ -78,6 +91,8 @@ python3 scripts/wakeword_dataset_report.py --json
 - `scripts/wakeword_capture_ch0_record.sh` + `scripts/wakeword_channel0_tee.py` - live recorder: keeps feeding satellite while writing real mono WAV segments.
 - `scripts/wakeword_dataset_report.py` - reports raw live hours, debug recordings, curated real positives, and false wakes.
 - `scripts/wakeword_real_positive_session.py` - controlled real-user positive collection from Wyoming `*-wake.wav` files.
+- `scripts/wakeword_noise_watchdog.py` - tracks the 168 recorded-hour noise session and notifies HA when complete or stalled.
+- `scripts/install_wakeword_noise_cron.sh` - idempotently installs the current-user watchdog cron.
 
 ## 3. Важное открытие по данным
 
@@ -374,6 +389,7 @@ Artifacts:
 2. Дать `raw_live/` recorder накопить минимум 7 дней домашнего шума:
    - проверить рост `/home/ultra/oww-dataset/raw_live/`
    - считать FPR через full streaming evaluation, а не только sampled windows
+   - во время этой записи не произносить activation phrase; любые wake hits за этот период считать false-wake candidates до ручной проверки
 3. Записать 50-100 реальных positives:
    - `эй Милош`
    - `Милош`
