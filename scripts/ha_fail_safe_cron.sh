@@ -8,7 +8,12 @@ if [ -n "$UPTIME_SEC" ] && [ "$UPTIME_SEC" -lt 600 ]; then
     exit 0
 fi
 
-if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check >> "$LOG" 2>&1; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Issues detected, running fix-all..." >> "$LOG"
+if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-ha >> "$LOG" 2>&1; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Local HA check failed, running fix-all..." >> "$LOG"
     /home/ultra/homeassistant/scripts/ha_fail_safe.sh fix-all >> "$LOG" 2>&1
+    exit $?
+fi
+
+if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-dataplicity >> "$LOG" 2>&1; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dataplicity check failed while local HA is online; warning only, no HA restart" >> "$LOG"
 fi

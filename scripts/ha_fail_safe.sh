@@ -8,9 +8,51 @@ set -e
 LOG_DIR="/tmp/ha_fail_safe"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$(date +%Y%m%d_%H%M%S).log"
+RESTART_HISTORY="$LOG_DIR/restart_history"
+MAX_RESTARTS_PER_WINDOW="${HA_MAX_RESTARTS_PER_WINDOW:-3}"
+RESTART_WINDOW_SEC="${HA_RESTART_WINDOW_SEC:-3600}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
+}
+
+prune_restart_history() {
+    local now cutoff tmp
+    now=$(date +%s)
+    cutoff=$((now - RESTART_WINDOW_SEC))
+    tmp="$RESTART_HISTORY.tmp"
+
+    if [ -f "$RESTART_HISTORY" ]; then
+        awk -v cutoff="$cutoff" '$1 >= cutoff { print $1 }' "$RESTART_HISTORY" > "$tmp" || true
+        mv "$tmp" "$RESTART_HISTORY"
+    else
+        : > "$RESTART_HISTORY"
+    fi
+}
+
+recent_restart_count() {
+    prune_restart_history
+    wc -l < "$RESTART_HISTORY" | tr -d ' '
+}
+
+can_restart_ha() {
+    if [ "${HA_RESTART_FORCE:-0}" = "1" ]; then
+        return 0
+    fi
+
+    local count
+    count=$(recent_restart_count)
+    if [ "$count" -ge "$MAX_RESTARTS_PER_WINDOW" ]; then
+        log "Restart limit reached: ${count}/${MAX_RESTARTS_PER_WINDOW} HA restarts in the last ${RESTART_WINDOW_SEC}s; skipping restart"
+        return 1
+    fi
+
+    return 0
+}
+
+record_restart_attempt() {
+    prune_restart_history
+    date +%s >> "$RESTART_HISTORY"
 }
 
 get_dataplicity_url() {
@@ -33,36 +75,51 @@ fi
 
 check_ha() {
     local url="${HA_URL:-http://localhost:8123}"
-    local response=$(curl -s --connect-timeout 5 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo "000")
-    if [ "$response" = "200" ]; then
-        log "✓ HA is accessible (HTTP $response)"
-        return 0
-    else
-        log "✗ HA is NOT accessible (HTTP $response)"
-        return 1
-    fi
+    local response="000"
+    local attempt
+
+    for attempt in 1 2 3; do
+        response=$(curl -sS --connect-timeout 5 -m 8 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
+        if [ "$response" = "200" ]; then
+            log "✓ HA is accessible (HTTP $response)"
+            return 0
+        fi
+        [ "$attempt" -lt 3 ] && sleep 2
+    done
+
+    log "✗ HA is NOT accessible (HTTP ${response:-000})"
+    return 1
 }
 
 check_dataplicity() {
-    local body=$(curl -s --connect-timeout 10 -m 15 "$DATAPLICITY_URL" 2>/dev/null || echo "")
-    if [ -z "$body" ]; then
-        log "✗ Dataplicity tunnel did not respond (empty body)"
+    local api_url="${DATAPLICITY_URL%/}/api/"
+    local headers response template
+    headers=$(mktemp "$LOG_DIR/dataplicity_headers.XXXXXX")
+    response=$(curl -sS -L --connect-timeout 10 -m 20 -D "$headers" -o /dev/null -w '%{http_code}' "$api_url" 2>/dev/null || true)
+
+    if grep -qi '^wormhole-template:' "$headers"; then
+        template=$(awk -F': ' 'tolower($1) == "wormhole-template" { print $2; exit }' "$headers" | tr -d '\r')
+        rm -f "$headers"
+        log "✗ Dataplicity tunnel returned wormhole template ${template:-unknown} for $api_url"
         return 1
     fi
-    if echo "$body" | grep -qi "device offline"; then
-        log "✗ Dataplicity tunnel reports 'Device offline'"
-        return 1
-    fi
-    if echo "$body" | grep -qi "wormhole"; then
-        log "✗ Dataplicity tunnel shows wormhole page (not proxying to HA)"
-        return 1
-    fi
-    if ! echo "$body" | grep -qi "home.assistant\|home-assistant"; then
-        log "✗ Dataplicity tunnel response does not contain Home Assistant content"
-        return 1
-    fi
-    log "✓ Dataplicity tunnel is proxying to HA correctly"
-    return 0
+
+    rm -f "$headers"
+
+    case "$response" in
+        200|401)
+            log "✓ Dataplicity tunnel reaches HA API (HTTP $response)"
+            return 0
+            ;;
+        000|"")
+            log "✗ Dataplicity tunnel did not respond for $api_url"
+            return 1
+            ;;
+        *)
+            log "✗ Dataplicity tunnel returned unexpected HTTP $response for $api_url"
+            return 1
+            ;;
+    esac
 }
 
 fix_dataplicity() {
@@ -150,10 +207,13 @@ PYEOF
 restart_ha() {
     local container="${HA_CONTAINER:-homeassistant-homeassistant-1}"
 
+    can_restart_ha || return 1
+
     log "Checking HA before restart..."
     check_ha || log "HA already down, proceeding with restart"
 
     log "Restarting container: $container"
+    record_restart_attempt
     docker restart "$container" 2>&1 | tee -a "$LOG"
 
     log "Waiting for HA to come back (max 120s)..."
@@ -242,6 +302,12 @@ case "${1:-status}" in
         check_ha
         check_dataplicity
         ;;
+    check-ha)
+        check_ha
+        ;;
+    check-dataplicity)
+        check_dataplicity
+        ;;
     fix-orphaned)
         fix_orphaned
         ;;
@@ -250,9 +316,13 @@ case "${1:-status}" in
         ;;
     fix-all)
         log "Running full fix cycle..."
-        fix_orphaned || true
-        if ! check_dataplicity; then
-            fix_dataplicity || true
+        if check_ha; then
+            if ! check_dataplicity; then
+                log "Dataplicity check failed while local HA is online; not restarting HA automatically"
+            fi
+        else
+            fix_orphaned || true
+            restart_ha || true
         fi
         ;;
     restart)
@@ -262,7 +332,7 @@ case "${1:-status}" in
         status_report
         ;;
     *)
-        echo "Usage: $0 {check|fix-orphaned|fix-dataplicity|fix-all|restart|status}"
+        echo "Usage: $0 {check|check-ha|check-dataplicity|fix-orphaned|fix-dataplicity|fix-all|restart|status}"
         exit 1
         ;;
 esac
