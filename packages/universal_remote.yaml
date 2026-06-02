@@ -8,6 +8,14 @@ input_text:
     max: 16
     initial: "0"
     icon: mdi:gesture-double-tap
+  ac_last_mode:
+    # Last non-off hvac mode of the Haier AC. Restored when the AC is turned
+    # on from the remote (prime short-press) so it comes back in the mode you
+    # last used instead of whatever climate.turn_on would pick by default.
+    name: AC last used mode
+    max: 10
+    initial: "cool"
+    icon: mdi:air-conditioner
 
 input_boolean:
   nav_to_tv:
@@ -962,8 +970,38 @@ automation:
                      wait.trigger.to_state.attributes.event_type == 'prime_hold' }}
                 then:
                   - stop: "hold detected, prime short suppressed"
-              - action: climate.toggle
-                target: { entity_id: climate.konditsioner_haier_konditsioner }
+              # Toggle: off → turn on in the LAST used mode (not a fixed
+              # default); on → turn off. Stored by the "Remember AC last
+              # mode" automation below.
+              - if: "{{ is_state('climate.konditsioner_haier_konditsioner', 'off') }}"
+                then:
+                  - action: climate.set_hvac_mode
+                    target: { entity_id: climate.konditsioner_haier_konditsioner }
+                    data:
+                      hvac_mode: "{{ states('input_text.ac_last_mode') | default('cool', true) }}"
+                else:
+                  - action: climate.turn_off
+                    target: { entity_id: climate.konditsioner_haier_konditsioner }
+
+  # ===== Remember the AC's last non-off mode =====
+  # Whenever the Haier AC sits in any real mode, stash it so the remote's
+  # prime short-press can restore it on the next power-on.
+  - alias: Remember AC last mode
+    id: ac_remember_last_mode
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: climate.konditsioner_haier_konditsioner
+    condition:
+      - condition: template
+        value_template: >-
+          {{ trigger.to_state is not none and
+             trigger.to_state.state not in ['off', 'unknown', 'unavailable'] and
+             trigger.to_state.state != states('input_text.ac_last_mode') }}
+    action:
+      - action: input_text.set_value
+        target: { entity_id: input_text.ac_last_mode }
+        data: { value: "{{ trigger.to_state.state }}" }
 
   # ===== Disney: open Kodi (short) / play next episode (hold) =====
   - alias: Universal Remote Disney
