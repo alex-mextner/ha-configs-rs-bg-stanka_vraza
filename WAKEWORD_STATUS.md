@@ -4,27 +4,29 @@
 
 ## 1. Текущий продакшен-статус
 
-Активная модель заменена на V2 DNN:
+Активная модель заменена на V2 DNN HNM iter7:
 
 - Активный файл: `/home/ultra/oww-models/ey_milosh.tflite`
-- Размер: 862528 bytes
-- Порог в `ha.docker-compose.yaml`: `0.97`
+- Размер: 1849152 bytes
+- SHA256: `63d34d0fb9940014e220d639a9624ce4cbb86d6f47101c243bd4e7771649a56f`
+- Порог в `ha.docker-compose.yaml`: `0.991`
 - Сервис: `wyoming-openwakeword`
 - Wake word name в satellite: `ey_milosh`
 - Backup V1: `/home/ultra/oww-models/backups/ey_milosh_v1_backup_20260601_130310.tflite`
+- Backup previous active V2: `/home/ultra/oww-models/ey_milosh.tflite.backup.20260602-190941`
 
-После замены пересозданы только voice services:
+После замены 2026-06-02 пересоздан только wake service:
 
 ```bash
-docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwakeword wyoming-satellite
 docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwakeword
 ```
 
 Проверено по логам:
 
-- `wyoming-openwakeword` видит только `ey_milosh`
-- threshold загружен как `0.97`
-- satellite подключился к wake service
+- `wyoming-openwakeword` нашел `/custom-models/ey_milosh.tflite`
+- threshold загружен как `0.991`
+- model list: `['ey_milosh']`
+- satellite client подключился к wake service
 - Home Assistant container не перезапускался
 
 ## 2. Что изменилось в методике
@@ -69,7 +71,7 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
 | Synthetic positives | 4500 | 0.8469 h | train/val/test |
 | Adversarial negatives | 2500 | 0.5856 h | train/val/test |
 | Home false wake negatives | 216 | 0.1200 h | train/val/test |
-| Debug STT recordings | 78 | 82.85 h available, 400 sampled windows | test only |
+| Debug STT recordings | 78 | 82.85 h available, 1200 deterministic sampled windows in current deploy audit | test only |
 
 ## 4. Итерации и метрики
 
@@ -322,7 +324,7 @@ Artifacts:
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/run_report.json`
 
-Вывод: best current offline TFLite candidate. It matches active iter2 test recall (`0.9850`) while removing the 3 STT false positives on the deterministic 1200-window sample. It was not deployed and active `/home/ultra/oww-models/ey_milosh.tflite` was not changed.
+Вывод: deployed 2026-06-02. It matches previous active iter2 test recall (`0.9850`) while removing the 3 STT false positives on the deterministic 1200-window sample. Active `/home/ultra/oww-models/ey_milosh.tflite` now points to this iter7 TFLite artifact, and `wyoming-openwakeword` runs it with threshold `0.991`.
 
 ## 5. Ограничения текущих метрик
 

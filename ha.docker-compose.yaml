@@ -86,7 +86,7 @@ services:
       - --preload-model
       - ey_milosh
       - --threshold
-      - "0.97"
+      - "0.991"
       - --debug
     ports:
       - "10400:10400"
