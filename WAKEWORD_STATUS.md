@@ -1,6 +1,6 @@
 # Статус: кастомная wake word модель `ey_milosh`
 
-Дата обновления: 2026-06-01
+Дата обновления: 2026-06-02
 
 ## 1. Текущий продакшен-статус
 
@@ -124,6 +124,85 @@ TFLite verification:
 Report: `/home/ultra/oww-models/ey_milosh_v2_iter2_dnn_margin/dnn/metrics_tflite.json`
 
 Вывод: V2 DNN TFLite достаточно хороша для live trial. Главная цена порога `0.97` - часть single-word positives `Милош` теряется. Фраза `эй Милош` на synthetic holdout прошла без FN.
+
+### Iteration 3: DNN recall recovery, larger STT sample
+
+Run dir: `/home/ultra/oww-models/ey_milosh_v2_iter3_dnn_recall/`
+
+Параметры:
+
+- `--max-stt-windows 1200`
+- `--epochs 60`
+- `--architectures dnn`
+- `--context-frames 16`
+- `--hidden 192`
+- `--negative-weight 2.0`
+- `--positive-augmentations 4`
+
+PyTorch checkpoint metrics:
+
+| Metric | Validation | Test |
+|---|---:|---:|
+| Selected threshold | 0.81 | 0.81 |
+| Recall | 0.9914 | 0.9835 |
+| FP / FPR/hour | 0 / 0.0000 | 0 / 0.0000 |
+| Debug STT sampled windows | - | 1200 |
+| Debug STT FP | - | 0 |
+| Debug STT score max | - | 0.4866 |
+
+Artifacts:
+
+- `/home/ultra/oww-models/ey_milosh_v2_iter3_dnn_recall/dnn/ey_milosh_v2_iter3_dnn_recall_dnn.pt`
+- `/home/ultra/oww-models/ey_milosh_v2_iter3_dnn_recall/dnn/ey_milosh_v2_iter3_dnn_recall_dnn.onnx`
+- `/home/ultra/oww-models/ey_milosh_v2_iter3_dnn_recall/dnn/metrics.json`
+- `/home/ultra/oww-models/ey_milosh_v2_iter3_dnn_recall/run_report.json`
+
+Conversion blocker: `scripts/wakeword_torch_to_tflite.py` requires TensorFlow, but `oww-train:latest` and local `hga/` do not currently have TensorFlow installed. No TFLite was produced for this run.
+
+Вывод: iter3 is safer on the enlarged STT sample than active iter2 TFLite, but recall regressed. Not a deploy candidate unless TFLite conversion is solved and the lower recall tradeoff is explicitly accepted.
+
+### Iteration 4: DNN recall recovery, lower negative weight
+
+Run dir: `/home/ultra/oww-models/ey_milosh_v2_iter4_dnn_recall_nw16/`
+
+Параметры совпадают с iter3, except `--negative-weight 1.6`.
+
+PyTorch checkpoint metrics:
+
+| Metric | Validation | Test |
+|---|---:|---:|
+| Selected threshold | 0.97 | 0.97 |
+| Recall | 0.9957 | 0.9835 |
+| FP / FPR/hour | 0 / 0.0000 | 3 / 3.8839 |
+| Debug STT sampled windows | - | 1200 |
+| Debug STT FP | - | 3 |
+| Debug STT score max | - | 0.9996 |
+
+Artifacts:
+
+- `/home/ultra/oww-models/ey_milosh_v2_iter4_dnn_recall_nw16/dnn/ey_milosh_v2_iter4_dnn_recall_nw16_dnn.pt`
+- `/home/ultra/oww-models/ey_milosh_v2_iter4_dnn_recall_nw16/dnn/ey_milosh_v2_iter4_dnn_recall_nw16_dnn.onnx`
+- `/home/ultra/oww-models/ey_milosh_v2_iter4_dnn_recall_nw16/dnn/metrics.json`
+- `/home/ultra/oww-models/ey_milosh_v2_iter4_dnn_recall_nw16/run_report.json`
+
+Вывод: iter4 is not a deploy candidate. It improves validation recall vs iter3, but test recall remains below active iter2 and STT false positives return.
+
+### Active iter2 TFLite re-check on 1200 STT windows
+
+Report: `/home/ultra/oww-models/ey_milosh_v2_iter2_dnn_margin/dnn/metrics_tflite_stt1200.json`
+
+| Metric | Value |
+|---|---:|
+| Threshold | 0.97 |
+| Validation recall | 0.9928 |
+| Validation FP / FPR/hour | 0 / 0.0000 |
+| Test recall | 0.9850 |
+| Test FP / FPR/hour | 3 / 3.8839 |
+| Debug STT sampled windows | 1200 |
+| Debug STT FP | 3 |
+| Debug STT score max | 0.9977 |
+
+This shows the previous `debug STT max score 0.8609` and FP=0 result was sample-size dependent (`max-stt-windows 400`). On the larger deterministic 1200-window sample, active iter2 still has the best available TFLite recall, but it no longer has offline FP=0.
 
 ## 5. Ограничения текущих метрик
 
