@@ -1,7 +1,7 @@
 [submodule "submodules/dataplicity"]
 	path = submodules/dataplicity
 	url = https://github.com/alex-mextner/Dataplicity.git
-	branch = fix/dataplicity-modern-api
+	branch = fix/bump-dataplicity-agent
 [submodule "submodules/home-generative-agent"]
 	path = submodules/home-generative-agent
 	url = https://github.com/goruck/home-generative-agent.git
