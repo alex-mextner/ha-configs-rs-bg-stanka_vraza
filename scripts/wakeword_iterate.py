@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: ANN201, ANN202, ANN205, ARG004, BLE001, D101, D102, D103, D213, E501, EM102, EXE001, FBT001, I001, N806, NPY002, PERF401, PLC0415, PLR0402, PLR0913, PLR0915, PLR2004, PLW2901, RUF046, RUF100, S311, S324, T201, TRY003, UP035
+# ruff: noqa: ANN201, ANN202, ANN205, ARG004, BLE001, D101, D102, D103, D213, E501, EM102, EXE001, FBT001, I001, N806, NPY002, PERF401, PLC0415, PLR0402, PLR0912, PLR0913, PLR0915, PLR2004, PLW2901, RUF046, RUF100, S311, S324, T201, TRY003, UP035
 """Iterative openWakeWord training and evaluation for the local ey_milosh model.
 
 Run from the training container, for example:
@@ -39,7 +39,14 @@ import soundfile as sf
 SR = 16000
 EMBEDDING_DIM = 96
 DEFAULT_SEED = 20260601
-THRESHOLDS = np.round(np.arange(0.05, 1.0, 0.01), 2)
+THRESHOLDS = np.unique(
+    np.concatenate(
+        [
+            np.round(np.arange(0.05, 1.0, 0.01), 2),
+            np.round(np.arange(0.991, 1.0, 0.001), 3),
+        ]
+    )
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,6 +58,7 @@ class AudioItem:
     duration: float
     split: str
     windows: int = 1
+    offsets: tuple[float, ...] = ()
 
     @property
     def item_id(self) -> str:
@@ -318,8 +326,8 @@ def extract_features(
         if item.split != split:
             continue
 
-        if item.source == "negative_debug_stt_sample":
-            offsets = stt_window_offsets(item.duration, item.windows, clip_sec, item.item_id)
+        if item.source.startswith("negative_debug_stt_"):
+            offsets = list(item.offsets) if item.offsets else stt_window_offsets(item.duration, item.windows, clip_sec, item.item_id)
             for offset in offsets:
                 selected.append((item, 0, offset))
             continue
@@ -576,6 +584,210 @@ def evaluate_scores(
     }
 
 
+def predict_tflite_scores(model_path: Path, x: np.ndarray, batch_size: int) -> np.ndarray:
+    import ai_edge_litert.interpreter as tflite
+
+    interpreter = tflite.Interpreter(model_path=str(model_path))
+    input_details = interpreter.get_input_details()[0]
+    input_index = input_details["index"]
+    output_index = interpreter.get_output_details()[0]["index"]
+    outputs = []
+    for start in range(0, len(x), batch_size):
+        xb = x[start : start + batch_size].astype(np.float32)
+        interpreter.resize_tensor_input(input_index, xb.shape, strict=False)
+        interpreter.allocate_tensors()
+        interpreter.set_tensor(input_index, xb)
+        interpreter.invoke()
+        outputs.append(interpreter.get_tensor(output_index).reshape(-1))
+    return np.concatenate(outputs, axis=0) if outputs else np.empty((0,), dtype=np.float32)
+
+
+def tflite_context_frames(model_path: Path) -> int:
+    import ai_edge_litert.interpreter as tflite
+
+    interpreter = tflite.Interpreter(model_path=str(model_path))
+    input_details = interpreter.get_input_details()[0]
+    shape = list(input_details["shape"])
+    if len(shape) != 3 or shape[1] != EMBEDDING_DIM:
+        raise RuntimeError(f"unexpected TFLite input shape: {shape}")
+    return int(shape[2])
+
+
+def allocate_windows_by_duration(
+    files: list[tuple[Path, float]],
+    total_windows: int,
+) -> list[tuple[Path, float, int]]:
+    if not files or total_windows <= 0:
+        return []
+
+    total_duration = sum(duration for _, duration in files)
+    by_path: list[tuple[Path, float, int]] = []
+    for path, duration in files:
+        count = max(1, round(total_windows * (duration / total_duration)))
+        by_path.append((path, duration, count))
+
+    while sum(count for _, _, count in by_path) > total_windows:
+        by_path.sort(key=lambda row: (row[2], row[1]), reverse=True)
+        path, duration, count = by_path[0]
+        by_path[0] = (path, duration, count - 1)
+
+    return [(path, duration, count) for path, duration, count in by_path if count > 0]
+
+
+def reserved_debug_offsets(
+    items: list[AudioItem],
+    clip_sec: float,
+) -> dict[Path, list[float]]:
+    offsets_by_path: dict[Path, list[float]] = defaultdict(list)
+    for item in items:
+        if item.source != "negative_debug_stt_sample":
+            continue
+        offsets_by_path[item.path].extend(stt_window_offsets(item.duration, item.windows, clip_sec, item.item_id))
+    return offsets_by_path
+
+
+def overlaps_reserved(offset: float, reserved: list[float], clip_sec: float) -> bool:
+    return any(abs(offset - candidate) < clip_sec for candidate in reserved)
+
+
+def mine_debug_hard_negatives(
+    base_items: list[AudioItem],
+    debug_root: Path,
+    model_path: Path,
+    context_frames: int,
+    openwakeword_root: Path,
+    candidate_windows: int,
+    hard_windows: int,
+    score_floor: float,
+    fill_below_floor: bool,
+    seed: int,
+    feature_batch_size: int,
+    batch_size: int,
+    ncpu: int,
+) -> tuple[list[AudioItem], dict[str, Any]]:
+    if hard_windows <= 0 or candidate_windows <= 0:
+        return [], {"enabled": False}
+
+    model_context = tflite_context_frames(model_path)
+    if model_context != context_frames:
+        raise RuntimeError(
+            f"hard negative model context {model_context} does not match requested context {context_frames}"
+        )
+
+    stt_files = [(path, duration) for path, duration in valid_wavs(debug_root) if path.name.endswith("-stt.wav")]
+    clip_sec = context_samples(context_frames) / SR
+    reserved = reserved_debug_offsets(base_items, clip_sec)
+
+    candidates: list[AudioItem] = []
+    skipped_overlap = 0
+    for path, duration, count in allocate_windows_by_duration(stt_files, candidate_windows):
+        offsets = stt_window_offsets(duration, count, clip_sec, f"hard-mine:{seed}:{path.as_posix()}")
+        kept_offsets = []
+        for offset in offsets:
+            if overlaps_reserved(offset, reserved.get(path, []), clip_sec):
+                skipped_overlap += 1
+                continue
+            kept_offsets.append(offset)
+        if kept_offsets:
+            candidates.append(
+                AudioItem(
+                    path=path,
+                    label=0,
+                    bucket="debug_stt_hard_mine_candidates",
+                    source="negative_debug_stt_hard_candidate",
+                    duration=duration,
+                    split="mine",
+                    windows=len(kept_offsets),
+                    offsets=tuple(kept_offsets),
+                )
+            )
+
+    if not candidates:
+        return [], {
+            "enabled": True,
+            "model": str(model_path),
+            "candidate_windows_requested": candidate_windows,
+            "selected_windows_requested": hard_windows,
+            "candidate_windows_after_overlap_filter": 0,
+            "skipped_reserved_overlap": skipped_overlap,
+            "selected_windows": 0,
+        }
+
+    x_mine, y_mine, meta_mine = extract_features(
+        candidates,
+        context_frames=context_frames,
+        split="mine",
+        openwakeword_root=openwakeword_root,
+        batch_size=feature_batch_size,
+        ncpu=ncpu,
+        positive_augmentations=1,
+        add_noise=False,
+    )
+    if not len(x_mine) or (y_mine == 1).any():
+        error_message = "hard negative mining expected negative-only candidate features"
+        raise RuntimeError(error_message)
+
+    scores = predict_tflite_scores(model_path, x_mine, batch_size=batch_size)
+    order = np.argsort(scores)[::-1]
+    above_floor = [int(idx) for idx in order if scores[idx] >= score_floor]
+    selected_indices = above_floor[:hard_windows]
+    if len(selected_indices) < hard_windows and fill_below_floor:
+        selected = set(selected_indices)
+        for idx in order:
+            if int(idx) in selected:
+                continue
+            selected_indices.append(int(idx))
+            if len(selected_indices) >= hard_windows:
+                break
+
+    selected_by_path: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    duration_by_path: dict[str, float] = {}
+    for idx in selected_indices:
+        meta = meta_mine[idx]
+        path = meta["path"]
+        selected_by_path[path].append((float(meta["offset"]), float(scores[idx])))
+        duration_by_path[path] = float(meta["duration"])
+
+    hard_items = [
+        AudioItem(
+            path=Path(path),
+            label=0,
+            bucket="debug_stt_hard_mined",
+            source="negative_debug_stt_hard_mined",
+            duration=duration_by_path[path],
+            split="train",
+            windows=len(rows),
+            offsets=tuple(offset for offset, _score in sorted(rows)),
+        )
+        for path, rows in sorted(selected_by_path.items())
+    ]
+
+    selected_scores = scores[selected_indices] if selected_indices else np.asarray([], dtype=np.float32)
+    return hard_items, {
+        "enabled": True,
+        "model": str(model_path),
+        "candidate_windows_requested": candidate_windows,
+        "selected_windows_requested": hard_windows,
+        "candidate_windows_after_overlap_filter": int(len(meta_mine)),
+        "skipped_reserved_overlap": skipped_overlap,
+        "selected_windows": int(len(selected_indices)),
+        "score_floor": score_floor,
+        "fill_below_score_floor": fill_below_floor,
+        "selected_above_score_floor": int(sum(float(score) >= score_floor for score in selected_scores)),
+        "selected_score_min": float(selected_scores.min()) if len(selected_scores) else None,
+        "selected_score_median": float(np.median(selected_scores)) if len(selected_scores) else None,
+        "selected_score_max": float(selected_scores.max()) if len(selected_scores) else None,
+        "top_candidates": [
+            {
+                "path": meta_mine[int(idx)]["path"],
+                "offset": float(meta_mine[int(idx)]["offset"]),
+                "score": float(scores[int(idx)]),
+            }
+            for idx in order[: min(20, len(order))]
+        ],
+    }
+
+
 def train_model(
     x_train: np.ndarray,
     y_train: np.ndarray,
@@ -714,8 +926,34 @@ def run_iterate(args: argparse.Namespace) -> None:
         max_stt_windows=args.max_stt_windows,
         salt=str(args.seed),
     )
+    hard_negative_report = {"enabled": False}
+    if args.hard_negative_model:
+        hard_items, hard_negative_report = mine_debug_hard_negatives(
+            base_items=items,
+            debug_root=args.debug_root,
+            model_path=args.hard_negative_model,
+            context_frames=args.context_frames,
+            openwakeword_root=args.openwakeword_root,
+            candidate_windows=args.hard_negative_candidates,
+            hard_windows=args.hard_negative_windows,
+            score_floor=args.hard_negative_score_floor,
+            fill_below_floor=args.hard_negative_fill_below_floor,
+            seed=args.seed,
+            feature_batch_size=args.feature_batch_size,
+            batch_size=args.batch_size,
+            ncpu=args.ncpu,
+        )
+        items.extend(hard_items)
+        discovery["debug_stt_hard_mined_windows_train"] = sum(item.windows for item in hard_items)
+        discovery["debug_stt_hard_mined_files_train"] = len(hard_items)
     dataset_summary = summarize_items(items)
-    print(json.dumps({"discovery": discovery, "dataset": dataset_summary}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"discovery": discovery, "dataset": dataset_summary, "hard_negative_mining": hard_negative_report},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
     feature_cache = run_dir / f"features_context{args.context_frames}.npz"
     meta_cache = run_dir / f"features_context{args.context_frames}.meta.json"
@@ -789,6 +1027,7 @@ def run_iterate(args: argparse.Namespace) -> None:
         "seed": args.seed,
         "discovery": discovery,
         "dataset_summary": dataset_summary,
+        "hard_negative_mining": hard_negative_report,
         "feature_shapes": {
             "train": list(x_train.shape),
             "val": list(x_val.shape),
@@ -970,6 +1209,15 @@ def run_evaluate_tflite(args: argparse.Namespace) -> None:
         target_fpr_per_hour=args.target_fpr_per_hour,
         selection_recall_tolerance=args.selection_recall_tolerance,
     )
+    test_sweep_report = evaluate_scores(
+        y_test,
+        test_scores,
+        meta_test,
+        thresholds=THRESHOLDS,
+        clip_seconds=clip_sec,
+        target_fpr_per_hour=args.target_fpr_per_hour,
+        selection_recall_tolerance=args.selection_recall_tolerance,
+    )
     report = {
         "model": str(args.model),
         "context_frames": context_frames,
@@ -979,6 +1227,7 @@ def run_evaluate_tflite(args: argparse.Namespace) -> None:
         "feature_shapes": {"val": list(x_val.shape), "test": list(x_test.shape)},
         "validation": val_report,
         "test_at_validation_threshold": test_report,
+        "test_sweep_for_audit": test_sweep_report,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1012,6 +1261,11 @@ def build_parser() -> argparse.ArgumentParser:
     iterate.add_argument("--lr", type=float, default=1e-3)
     iterate.add_argument("--negative-weight", type=float, default=1.8)
     iterate.add_argument("--positive-augmentations", type=int, default=2)
+    iterate.add_argument("--hard-negative-model", type=Path)
+    iterate.add_argument("--hard-negative-candidates", type=int, default=6000)
+    iterate.add_argument("--hard-negative-windows", type=int, default=0)
+    iterate.add_argument("--hard-negative-score-floor", type=float, default=0.50)
+    iterate.add_argument("--hard-negative-fill-below-floor", action="store_true")
     iterate.add_argument("--rebuild-features", action="store_true")
     iterate.set_defaults(func=run_iterate)
 

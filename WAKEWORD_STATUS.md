@@ -48,6 +48,8 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
 Новый инструмент:
 
 - `scripts/wakeword_iterate.py` - dataset discovery, feature extraction, training, threshold sweep, reports.
+  - Added inline STT hard-negative mining: score debug STT candidate windows with a TFLite model, exclude overlap with deterministic STT test windows, and add only high-score windows as train negatives.
+  - Threshold sweep now includes high-resolution `0.991..0.999` points for near-saturated models.
 - `scripts/wakeword_torch_to_tflite.py` - прямой конвертер DNN checkpoint -> Keras/TFLite.
 
 ## 3. Важное открытие по данным
@@ -202,7 +204,125 @@ Report: `/home/ultra/oww-models/ey_milosh_v2_iter2_dnn_margin/dnn/metrics_tflite
 | Debug STT FP | 3 |
 | Debug STT score max | 0.9977 |
 
-This shows the previous `debug STT max score 0.8609` and FP=0 result was sample-size dependent (`max-stt-windows 400`). On the larger deterministic 1200-window sample, active iter2 still has the best available TFLite recall, but it no longer has offline FP=0.
+This shows the previous `debug STT max score 0.8609` and FP=0 result was sample-size dependent (`max-stt-windows 400`). On the larger deterministic 1200-window sample, active iter2 has good recall, but it no longer has offline FP=0.
+
+High-threshold re-check:
+
+Report: `/home/ultra/oww-models/ey_milosh_v2_iter2_dnn_margin/dnn/metrics_tflite_stt1200_highgrid.json`
+
+| Threshold | Test recall | Test FP / FPR/hour | Notes |
+|---:|---:|---:|---|
+| 0.97 | 0.9850 | 3 / 3.8839 | Active deployment threshold |
+| 0.998 | 0.9581 | 0 / 0.0000 | Best zero-FP active-model threshold |
+
+Вывод: простой подъем threshold у active iter2 убирает FP только ценой сильного recall regression.
+
+### Iteration 5: DNN HNM, filled hard-negative batch
+
+Run dir: `/home/ultra/oww-models/ey_milosh_v2_iter5_dnn_hnm_nw18/`
+
+Параметры:
+
+- mined from active `/home/ultra/oww-models/ey_milosh.tflite`
+- `--hard-negative-candidates 8000`
+- `--hard-negative-windows 256`
+- `--hard-negative-score-floor 0.60`
+- `--hidden 192`
+- `--negative-weight 1.8`
+- `--positive-augmentations 5`
+
+PyTorch checkpoint metrics:
+
+| Metric | Validation | Test |
+|---|---:|---:|
+| Selected threshold | 0.97 | 0.97 |
+| Recall | 0.9914 | 0.9790 |
+| FP / FPR/hour | 0 / 0.0000 | 1 / 1.2946 |
+| Best zero-FP audit threshold | - | 0.98 |
+| Best zero-FP audit recall | - | 0.9775 |
+
+Mining report: 7819 candidates after overlap filter; 256 selected, but only 19 were above score floor. This diluted hard-negative training with easy STT negatives.
+
+Вывод: not a deploy candidate. It reduced STT pressure but hurt recall.
+
+### Iteration 6: DNN strict HNM, lower negative weight
+
+Run dir: `/home/ultra/oww-models/ey_milosh_v2_iter6_dnn_hnm_strict_nw16/`
+
+Параметры:
+
+- strict hard-negative floor; no fill below floor
+- `--hard-negative-candidates 16000`
+- `--hard-negative-windows 128`
+- `--hard-negative-score-floor 0.50`
+- `--hidden 192`
+- `--negative-weight 1.6`
+- `--positive-augmentations 5`
+
+PyTorch checkpoint metrics:
+
+| Metric | Validation | Test |
+|---|---:|---:|
+| Selected threshold | 0.92 | 0.92 |
+| Recall | 0.9928 | 0.9805 |
+| FP / FPR/hour | 0 / 0.0000 | 0 / 0.0000 |
+| Best zero-FP audit threshold | - | 0.89 |
+| Best zero-FP audit recall | - | 0.9820 |
+
+Mining report: 15703 candidates after overlap filter; 39 selected, all above score floor; selected score range `0.5066..0.9997`.
+
+Вывод: HNM works for FP suppression, but recall is below active iter2 and iter3.
+
+### Iteration 7: DNN strict HNM, recall recovery
+
+Run dir: `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/`
+
+Параметры:
+
+- strict hard-negative floor; no fill below floor
+- `--hard-negative-candidates 16000`
+- `--hard-negative-windows 128`
+- `--hard-negative-score-floor 0.50`
+- `--hidden 256`
+- `--epochs 70`
+- `--negative-weight 1.2`
+- `--positive-augmentations 6`
+
+Mining report:
+
+- 15703 candidates after overlap filter
+- 39 selected hard negatives
+- selected score range `0.5066..0.9997`
+- selected median score `0.9484`
+
+PyTorch checkpoint metrics:
+
+| Metric | Validation | Test |
+|---|---:|---:|
+| Selected threshold | 0.99 | 0.99 |
+| Recall | 0.9942 | 0.9850 |
+| FP / FPR/hour | 0 / 0.0000 | 1 / 1.2946 |
+| Fine audit threshold | - | 0.991 |
+| Fine audit recall | - | 0.9850 |
+| Fine audit FP / FPR/hour | - | 0 / 0.0000 |
+
+TFLite verification:
+
+Report: `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
+
+| Threshold | Test recall | Test FP / FPR/hour | Test FN | Negative max |
+|---:|---:|---:|---:|---:|
+| 0.99 | 0.9850 | 1 / 1.2946 | 10 | 0.9907 |
+| 0.991 | 0.9850 | 0 / 0.0000 | 10 | 0.9907 |
+
+Artifacts:
+
+- `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256_dnn.pt`
+- `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/ey_milosh.tflite`
+- `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
+- `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/run_report.json`
+
+Вывод: best current offline TFLite candidate. It matches active iter2 test recall (`0.9850`) while removing the 3 STT false positives on the deterministic 1200-window sample. It was not deployed and active `/home/ultra/oww-models/ey_milosh.tflite` was not changed.
 
 ## 5. Ограничения текущих метрик
 
