@@ -760,19 +760,19 @@ automation:
             sequence:
               - variables:
                   target_temp: >-
-                    {{ [state_attr('climate.konditsioner_haier_konditsioner',
+                    {{ [state_attr('climate.kondei_1',
                                    'temperature') | int(22) + 1, 30] | min }}
               - action: climate.set_temperature
-                target: { entity_id: climate.konditsioner_haier_konditsioner }
+                target: { entity_id: climate.kondei_1 }
                 data: { temperature: "{{ target_temp }}" }
           - conditions: "{{ button == 'channel_down' }}"
             sequence:
               - variables:
                   target_temp: >-
-                    {{ [state_attr('climate.konditsioner_haier_konditsioner',
+                    {{ [state_attr('climate.kondei_1',
                                    'temperature') | int(22) - 1, 16] | max }}
               - action: climate.set_temperature
-                target: { entity_id: climate.konditsioner_haier_konditsioner }
+                target: { entity_id: climate.kondei_1 }
                 data: { temperature: "{{ target_temp }}" }
 
           # ---- Navigation ----
@@ -1000,11 +1000,11 @@ automation:
             sequence:
               - variables:
                   current_mode: >-
-                    {{ states('climate.konditsioner_haier_konditsioner') }}
+                    {{ states('climate.kondei_1') }}
                   new_mode: >-
                     {{ 'heat' if current_mode == 'cool' else 'cool' }}
               - action: climate.set_hvac_mode
-                target: { entity_id: climate.konditsioner_haier_konditsioner }
+                target: { entity_id: climate.kondei_1 }
                 data: { hvac_mode: "{{ new_mode }}" }
           - conditions: "{{ ev == 'prime' }}"
             sequence:
@@ -1022,15 +1022,15 @@ automation:
               # Toggle: off → turn on in the LAST used mode (not a fixed
               # default); on → turn off. Stored by the "Remember AC last
               # mode" automation below.
-              - if: "{{ is_state('climate.konditsioner_haier_konditsioner', 'off') }}"
+              - if: "{{ is_state('climate.kondei_1', 'off') }}"
                 then:
                   - action: climate.set_hvac_mode
-                    target: { entity_id: climate.konditsioner_haier_konditsioner }
+                    target: { entity_id: climate.kondei_1 }
                     data:
                       hvac_mode: "{{ states('input_text.ac_last_mode') | default('cool', true) }}"
                 else:
                   - action: climate.turn_off
-                    target: { entity_id: climate.konditsioner_haier_konditsioner }
+                    target: { entity_id: climate.kondei_1 }
 
   # ===== Remember the AC's last non-off mode =====
   # Whenever the Haier AC sits in any real mode, stash it so the remote's
@@ -1040,7 +1040,7 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id: climate.konditsioner_haier_konditsioner
+        entity_id: climate.kondei_1
     condition:
       - condition: template
         value_template: >-
