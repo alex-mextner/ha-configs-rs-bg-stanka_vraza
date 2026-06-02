@@ -208,3 +208,59 @@
   icon:
   picture:
   track: true
+
+'192_168_0_40':
+  name: 192.168.0.40
+  mac: 22:45:98:71:C9:C7
+  icon:
+  picture:
+  track: true
+
+'192_168_0_41':
+  name: 192.168.0.41
+  mac: E2:CF:52:AD:70:00
+  icon:
+  picture:
+  track: true
+
+'192_168_0_42':
+  name: 192.168.0.42
+  mac: 46:EC:5E:90:B9:F5
+  icon:
+  picture:
+  track: true
+
+'192_168_0_43_2':
+  name: 192.168.0.43
+  mac: D6:1D:15:2A:15:21
+  icon:
+  picture:
+  track: true
+
+'192_168_0_44':
+  name: 192.168.0.44
+  mac: DA:56:F9:85:D3:99
+  icon:
+  picture:
+  track: true
+
+'192_168_0_37_2':
+  name: 192.168.0.37
+  mac: CA:CA:F2:76:23:63
+  icon:
+  picture:
+  track: true
+
+'192_168_0_40_2':
+  name: 192.168.0.40
+  mac: FA:94:92:C2:07:71
+  icon:
+  picture:
+  track: true
+
+'192_168_0_33_2':
+  name: 192.168.0.33
+  mac: 6E:67:FC:80:38:1E
+  icon:
+  picture:
+  track: true

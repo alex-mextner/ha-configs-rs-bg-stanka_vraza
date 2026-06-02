@@ -42,6 +42,7 @@ zigbee.db-shm
 zigbee.db-wal
 .ha_run.lock
 .HA_VERSION
+known_devices.yaml
 
 # Secrets and credentials
 secrets.yaml
