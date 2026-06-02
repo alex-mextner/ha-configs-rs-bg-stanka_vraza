@@ -1,0 +1,110 @@
+# Projector — single media device on top of the ESP IR buttons.
+#
+# The ESP exposes 12 raw IR buttons (button.projector_*). This package
+# wraps the media-ish subset (power / play-pause / volume / mute) into one
+# `universal` media_player so it reads as a single device, and models the
+# power quirk: the projector turns ON with one press but needs TWO presses
+# ~1s apart to turn OFF. State is ASSUMED (fire-and-forget IR has no
+# feedback) — the physical projector remote can desync input_boolean below.
+
+input_boolean:
+  projector_power:
+    name: Projector power (assumed)
+    icon: mdi:projector
+
+script:
+  # One power frame = turn on. Mark assumed-on.
+  projector_turn_on:
+    alias: Projector turn on
+    mode: single
+    sequence:
+      - action: button.press
+        target: { entity_id: button.projector_power }
+      - action: input_boolean.turn_on
+        target: { entity_id: input_boolean.projector_power }
+
+  # The projector requires a double power press ~3s apart to power off
+  # (single press just shows the "press again to power off" OSD). Mirror
+  # that here so a single media_player.turn_off actually powers it down.
+  projector_turn_off:
+    alias: Projector turn off
+    mode: single
+    sequence:
+      - action: button.press
+        target: { entity_id: button.projector_power }
+      - delay: "00:00:03"
+      - action: button.press
+        target: { entity_id: button.projector_power }
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.projector_power }
+
+automation:
+  # Projector power drives the active source. Turning the projector on makes
+  # it the active source (input_text.tv_source = projector); turning it off
+  # falls back to chromecast — you were watching on the projector, so route
+  # the TV back to the Chromecast. Only reverts to chromecast if projector
+  # was actually the active source (don't hijack if it powered off in the
+  # background while you were on pc/chromecast). tv_source +
+  # source_to_chromecast live in the universal_remote package; HA merges
+  # packages so the cross-package references resolve.
+  - alias: Projector power follows source
+    id: projector_power_follows_source
+    mode: queued
+    trigger:
+      - platform: state
+        entity_id: input_boolean.projector_power
+        from: "off"
+        to: "on"
+        id: "on"
+      - platform: state
+        entity_id: input_boolean.projector_power
+        from: "on"
+        to: "off"
+        id: "off"
+    action:
+      - choose:
+          - conditions: "{{ trigger.id == 'on' }}"
+            sequence:
+              - action: input_text.set_value
+                target: { entity_id: input_text.tv_source }
+                data: { value: projector }
+          - conditions: >-
+              {{ trigger.id == 'off' and
+                 is_state('input_text.tv_source', 'projector') }}
+            sequence:
+              - action: script.source_to_chromecast
+
+media_player:
+  # Commands-only universal player (no children) — state comes from the
+  # assumed-power input_boolean. Volume is relative (vol±/mute buttons),
+  # so no slider/level is exposed. Source cycling stays a raw button —
+  # the projector can only step inputs, not jump to a named one.
+  - platform: universal
+    name: Projector
+    unique_id: projector_ir
+    device_class: tv
+    commands:
+      turn_on:
+        action: script.projector_turn_on
+      turn_off:
+        action: script.projector_turn_off
+      volume_up:
+        action: button.press
+        target: { entity_id: button.projector_vol_up }
+      volume_down:
+        action: button.press
+        target: { entity_id: button.projector_vol_down }
+      volume_mute:
+        action: button.press
+        target: { entity_id: button.projector_mute }
+      media_play:
+        action: button.press
+        target: { entity_id: button.projector_play_pause }
+      media_pause:
+        action: button.press
+        target: { entity_id: button.projector_play_pause }
+      media_play_pause:
+        action: button.press
+        target: { entity_id: button.projector_play_pause }
+    attributes:
+      state: input_boolean.projector_power

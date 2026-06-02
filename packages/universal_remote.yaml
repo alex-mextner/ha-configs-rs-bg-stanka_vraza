@@ -102,7 +102,9 @@ script:
                 data:
                   command: "{{ atv_map[direction] }}"
                   delay_secs: 0
-          - conditions: "{{ source == 'pc' }}"
+          # projector source behaves like pc for navigation — content is
+          # Kodi on the PC; only power/volume/mute divert to the projector.
+          - conditions: "{{ source in ['pc', 'projector'] }}"
             sequence:
               - action: kodi.call_method
                 data:
@@ -136,15 +138,15 @@ script:
                 data:
                   command: "{{ atv_media_map[action] }}"
                   delay_secs: 0
-          - conditions: "{{ source == 'pc' and action == 'play_pause' }}"
+          - conditions: "{{ source in ['pc', 'projector'] and action == 'play_pause' }}"
             sequence:
               - action: media_player.media_play_pause
                 target: { entity_id: media_player.192_168_0_11 }
-          - conditions: "{{ source == 'pc' and action == 'previous' }}"
+          - conditions: "{{ source in ['pc', 'projector'] and action == 'previous' }}"
             sequence:
               - action: media_player.media_previous_track
                 target: { entity_id: media_player.192_168_0_11 }
-          - conditions: "{{ source == 'pc' and action == 'next' }}"
+          - conditions: "{{ source in ['pc', 'projector'] and action == 'next' }}"
             sequence:
               - action: media_player.media_next_track
                 target: { entity_id: media_player.192_168_0_11 }
@@ -216,6 +218,26 @@ script:
           - stop: "already on pc"
       - action: script.vkliuchi_serialy
 
+  # Projector source: no HDMI switch (the projector is its own display fed
+  # by the PC); just record the source and power the projector on. Content
+  # routing (nav / play-pause / etc.) is handled as 'pc' elsewhere.
+  source_to_projector:
+    alias: Source → projector (idempotent)
+    mode: single
+    sequence:
+      - if: "{{ states('input_text.tv_source') == 'projector' }}"
+        then:
+          - stop: "already on projector"
+      - action: input_text.set_value
+        target: { entity_id: input_text.tv_source }
+        data: { value: projector }
+      # Auto power-on (assumed-state aware: media_player.turn_on no-ops the
+      # IR send only if we already think it's on).
+      - if: "{{ not is_state('media_player.projector', 'on') }}"
+        then:
+          - action: media_player.turn_on
+            target: { entity_id: media_player.projector }
+
   # App launcher for Chromecast/Google TV.
   app_launch_on_chromecast:
     alias: Launch app on Chromecast
@@ -245,7 +267,7 @@ script:
               - action: remote.send_command
                 target: { entity_id: remote.televizor }
                 data: { command: KEYCODE_ENTER, delay_secs: 0 }
-          - conditions: "{{ source == 'pc' }}"
+          - conditions: "{{ source in ['pc', 'projector'] }}"
             sequence:
               - action: kodi.call_method
                 data:
@@ -296,7 +318,7 @@ script:
               - action: remote.send_command
                 target: { entity_id: remote.televizor }
                 data: { command: "text:{{ ' ' if (char | string) == 'space' else (char | string) }}" }
-          - conditions: "{{ mode == 'cycle' and source == 'pc' }}"
+          - conditions: "{{ mode == 'cycle' and source in ['pc', 'projector'] }}"
             sequence:
               - action: kodi.call_method
                 data:
@@ -309,7 +331,7 @@ script:
                   method: Input.SendText
                   text: "{{ ' ' if (char | string) == 'space' else (char | string) }}"
                   done: false
-          - conditions: "{{ mode == 'add' and source == 'pc' }}"
+          - conditions: "{{ mode == 'add' and source in ['pc', 'projector'] }}"
             sequence:
               - action: kodi.call_method
                 data:
@@ -350,7 +372,7 @@ script:
               - action: remote.send_command
                 target: { entity_id: remote.televizor }
                 data: { command: KEYCODE_ENTER, delay_secs: 0 }
-          - conditions: "{{ source == 'pc' }}"
+          - conditions: "{{ source in ['pc', 'projector'] }}"
             sequence:
               # Kodi: open the Search window, type the query, submit.
               - action: kodi.call_method
@@ -379,7 +401,7 @@ script:
               - action: remote.send_command
                 target: { entity_id: remote.televizor }
                 data: { command: KEYCODE_DEL, delay_secs: 0 }
-          - conditions: "{{ source == 'pc' }}"
+          - conditions: "{{ source in ['pc', 'projector'] }}"
             sequence:
               - action: kodi.call_method
                 data:
@@ -670,41 +692,68 @@ automation:
           # doesn't expose on/off state to HA, but Chromecast does).
           - conditions: "{{ button == 'power' }}"
             sequence:
-              - action: button.press
-                target: { entity_id: button.samsung_tv_power }
-              - if: "{{ states('input_text.tv_source') == 'chromecast' }}"
-                then:
-                  - choose:
-                      - conditions: "{{ is_state('media_player.televizor', 'on') or is_state('media_player.televizor', 'playing') or is_state('media_player.televizor', 'paused') or is_state('media_player.televizor', 'idle') }}"
-                        sequence:
-                          - action: remote.turn_off
+              - choose:
+                  # projector source → power the projector. media_player.toggle
+                  # picks turn_on (single press) or turn_off (double press
+                  # ~3s apart, the projector's OFF requirement) from assumed
+                  # state.
+                  - conditions: "{{ states('input_text.tv_source') == 'projector' }}"
+                    sequence:
+                      - action: media_player.toggle
+                        target: { entity_id: media_player.projector }
+                default:
+                  - action: button.press
+                    target: { entity_id: button.samsung_tv_power }
+                  - if: "{{ states('input_text.tv_source') == 'chromecast' }}"
+                    then:
+                      - choose:
+                          - conditions: "{{ is_state('media_player.televizor', 'on') or is_state('media_player.televizor', 'playing') or is_state('media_player.televizor', 'paused') or is_state('media_player.televizor', 'idle') }}"
+                            sequence:
+                              - action: remote.turn_off
+                                target: { entity_id: remote.televizor }
+                        default:
+                          - action: remote.turn_on
                             target: { entity_id: remote.televizor }
-                    default:
-                      - action: remote.turn_on
-                        target: { entity_id: remote.televizor }
 
+          # Source button cycles: pc → chromecast → projector → (loop).
           - conditions: "{{ button == 'input' }}"
             sequence:
               - choose:
                   - conditions: "{{ states('input_text.tv_source') == 'pc' }}"
                     sequence:
                       - action: script.source_to_chromecast
+                  - conditions: "{{ states('input_text.tv_source') == 'chromecast' }}"
+                    sequence:
+                      - action: script.source_to_projector
                 default:
+                  # projector (or any unknown) → pc
                   - action: script.source_to_pc
 
           # ---- Volume / mute ----
           - conditions: "{{ button == 'volume_up' }}"
             sequence:
               - action: button.press
-                target: { entity_id: button.samsung_tv_vol }
+                target:
+                  entity_id: >-
+                    {{ 'button.projector_vol_up'
+                       if states('input_text.tv_source') == 'projector'
+                       else 'button.samsung_tv_vol' }}
           - conditions: "{{ button == 'volume_down' }}"
             sequence:
               - action: button.press
-                target: { entity_id: button.samsung_tv_vol_2 }
+                target:
+                  entity_id: >-
+                    {{ 'button.projector_vol_down'
+                       if states('input_text.tv_source') == 'projector'
+                       else 'button.samsung_tv_vol_2' }}
           - conditions: "{{ button == 'mute' }}"
             sequence:
               - action: button.press
-                target: { entity_id: button.samsung_tv_mute }
+                target:
+                  entity_id: >-
+                    {{ 'button.projector_mute'
+                       if states('input_text.tv_source') == 'projector'
+                       else 'button.samsung_tv_mute' }}
 
           # ---- Haier AC via ch± ----
           - conditions: "{{ button == 'channel_up' }}"
@@ -775,7 +824,7 @@ automation:
                   level: warning
                   message: "IR-DBG ok_hold enter"
               - choose:
-                  - conditions: "{{ states('input_text.tv_source') == 'pc' }}"
+                  - conditions: "{{ states('input_text.tv_source') in ['pc', 'projector'] }}"
                     sequence:
                       - action: kodi.call_method
                         data:
@@ -816,7 +865,7 @@ automation:
                         data:
                           command: KEYCODE_BACK
                           delay_secs: 0
-                  - conditions: "{{ states('input_text.tv_source') == 'pc' }}"
+                  - conditions: "{{ states('input_text.tv_source') in ['pc', 'projector'] }}"
                     sequence:
                       - action: kodi.call_method
                         data:
@@ -892,7 +941,7 @@ automation:
               - action: script.audio_mode_handle_press
           - conditions: "{{ button == 'info' }}"
             sequence:
-              - if: "{{ states('input_text.tv_source') == 'pc' }}"
+              - if: "{{ states('input_text.tv_source') in ['pc', 'projector'] }}"
                 then:
                   - action: kodi.call_method
                     data:
