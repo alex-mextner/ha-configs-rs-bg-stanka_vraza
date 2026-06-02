@@ -43,3 +43,6 @@
 [submodule "submodules/dhcp-monitor"]
 	path = submodules/dhcp-monitor
 	url = https://github.com/jonnybergdahl/HomeAssistant_Dhcp_Monitor_Integration.git
+[submodule "submodules/ha-cover-time-based"]
+	path = submodules/ha-cover-time-based
+	url = https://github.com/Sese-Schneider/ha-cover-time-based.git
