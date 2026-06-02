@@ -2,9 +2,18 @@
 
 Дата обновления: 2026-06-02
 
-## 1. Текущий продакшен-статус
+## 1. Текущий статус
 
-Активная модель заменена на V2 DNN HNM iter7:
+Это не финально готовая wake word модель. Сейчас активирован только лучший offline-кандидат для live trial, чтобы начать собирать реальные false/true wake записи.
+
+Что еще не сделано:
+
+- нет недельной записи домашнего шума как full streaming evaluation
+- нет 50-100 реальных positive-записей голоса пользователя
+- нет размеченного live trial набора true wake / false wake
+- нет финального отчета по реальному recall/FPR на домашнем аудио
+
+Текущий live-trial candidate:
 
 - Активный файл: `/home/ultra/oww-models/ey_milosh.tflite`
 - Размер: 1849152 bytes
@@ -29,6 +38,11 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
 - satellite client подключился к wake service
 - Home Assistant container не перезапускался
 
+Offline report по этому кандидату:
+
+- `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
+- `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/run_report.json`
+
 ## 2. Что изменилось в методике
 
 Старый статус был слишком оптимистичным: он опирался на random window split и не отделял модельную метрику от реального deployment-порога.
@@ -45,7 +59,7 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
    - adversarial negatives
    - home false wake negatives
    - sampled STT debug negatives
-6. Baseline и финальная модель проверяются именно как `.tflite`, а не только как PyTorch checkpoint.
+6. Baseline и live-trial candidate проверяются именно как `.tflite`, а не только как PyTorch checkpoint.
 
 Новый инструмент:
 
@@ -324,7 +338,7 @@ Artifacts:
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/run_report.json`
 
-Вывод: deployed 2026-06-02. It matches previous active iter2 test recall (`0.9850`) while removing the 3 STT false positives on the deterministic 1200-window sample. Active `/home/ultra/oww-models/ey_milosh.tflite` now points to this iter7 TFLite artifact, and `wyoming-openwakeword` runs it with threshold `0.991`.
+Вывод: promoted to live-trial candidate 2026-06-02, not final readiness. It matches previous active iter2 synthetic/STT-window test recall (`0.9850`) while removing the 3 STT false positives on the deterministic 1200-window sample. Active `/home/ultra/oww-models/ey_milosh.tflite` now points to this iter7 TFLite artifact, and `wyoming-openwakeword` runs it with threshold `0.991`.
 
 ## 5. Ограничения текущих метрик
 
