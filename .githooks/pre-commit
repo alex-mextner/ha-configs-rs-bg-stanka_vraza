@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Pre-commit hook: validate staged Home Assistant YAML before commit.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+mapfile -t YAML_FILES < <(
+    git diff --cached --name-only --diff-filter=ACMR | grep -E '\.ya?ml$' || true
+)
+
+if [ "${#YAML_FILES[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+echo "[pre-commit] Validating YAML files..."
+
+if ! scripts/ha_validate_yaml.sh "${YAML_FILES[@]}"; then
+    echo ""
+    echo "COMMIT ABORTED: Fix YAML errors first."
+    echo "Check: scripts/ha_validate_yaml.sh FILE.yaml"
+    exit 1
+fi
+
+echo "[pre-commit] All YAML files valid. Proceeding with commit."
