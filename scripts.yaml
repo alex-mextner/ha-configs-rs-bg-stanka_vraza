@@ -38,7 +38,7 @@ vkliuchi_serialy:
       milliseconds: 999
   - action: button.press
     target:
-      entity_id: button.samsung_tv_right
+      entity_id: button.samsung_tv_left
     data: {}
   - delay:
       milliseconds: 500
@@ -68,7 +68,7 @@ vkliuchi_hromkast:
       milliseconds: 999
   - action: button.press
     target:
-      entity_id: button.samsung_tv_left
+      entity_id: button.samsung_tv_right
     data: {}
   - delay:
       milliseconds: 500
