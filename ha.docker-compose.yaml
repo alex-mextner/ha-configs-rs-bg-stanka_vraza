@@ -24,6 +24,9 @@ services:
 
   esphome:
     image: ghcr.io/esphome/esphome:latest
+    user: "1000:1000"
+    environment:
+      - HOME=/config
     volumes:
       - /home/ultra/esphome:/config
     ports:
