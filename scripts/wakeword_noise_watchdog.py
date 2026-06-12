@@ -204,33 +204,6 @@ def command_check(args: argparse.Namespace) -> int:
     ha_url = args.ha_url
     changed = False
 
-    if latest_age is None or latest_age > args.stale_seconds:
-        if stale_repeat_allowed(session, args.stale_repeat_hours):
-            message = (
-                "Wakeword background-noise recording appears stalled.\n"
-                f"Recorded hours: {raw_live['hours_since_start']:.4f}/{target_hours:.1f}\n"
-                f"Latest file: {raw_live.get('latest_file')}\n"
-                f"Latest age seconds: {latest_age}"
-            )
-            if args.dry_run:
-                print(message)
-            else:
-                print(json.dumps(notify_ha(ha_url, "Wakeword recording stalled", message, "wakeword_noise_stalled"), ensure_ascii=False, indent=2))
-            session["stale_notification_sent_at"] = now_utc().isoformat()
-            changed = True
-    elif session.get("stale_notification_sent_at") and not session.get("recovered_notification_sent_at"):
-        message = (
-            "Wakeword background-noise recording is receiving audio again.\n"
-            f"Recorded hours: {raw_live['hours_since_start']:.4f}/{target_hours:.1f}\n"
-            f"Latest file: {raw_live.get('latest_file')}"
-        )
-        if args.dry_run:
-            print(message)
-        else:
-            print(json.dumps(notify_ha(ha_url, "Wakeword recording recovered", message, "wakeword_noise_recovered"), ensure_ascii=False, indent=2))
-        session["recovered_notification_sent_at"] = now_utc().isoformat()
-        changed = True
-
     if status["complete"] and not session.get("completion_notification_sent_at"):
         message = (
             "Недельная запись фонового шума для wake word завершена.\n"
@@ -244,6 +217,34 @@ def command_check(args: argparse.Namespace) -> int:
             print(json.dumps(notify_ha(ha_url, "Wakeword noise recording complete", message, "wakeword_noise_complete"), ensure_ascii=False, indent=2))
         session["completion_notification_sent_at"] = now_utc().isoformat()
         changed = True
+
+    if not status["complete"]:
+        if latest_age is None or latest_age > args.stale_seconds:
+            if stale_repeat_allowed(session, args.stale_repeat_hours):
+                message = (
+                    "Wakeword background-noise recording appears stalled.\n"
+                    f"Recorded hours: {raw_live['hours_since_start']:.4f}/{target_hours:.1f}\n"
+                    f"Latest file: {raw_live.get('latest_file')}\n"
+                    f"Latest age seconds: {latest_age}"
+                )
+                if args.dry_run:
+                    print(message)
+                else:
+                    print(json.dumps(notify_ha(ha_url, "Wakeword recording stalled", message, "wakeword_noise_stalled"), ensure_ascii=False, indent=2))
+                session["stale_notification_sent_at"] = now_utc().isoformat()
+                changed = True
+        elif session.get("stale_notification_sent_at") and not session.get("recovered_notification_sent_at"):
+            message = (
+                "Wakeword background-noise recording is receiving audio again.\n"
+                f"Recorded hours: {raw_live['hours_since_start']:.4f}/{target_hours:.1f}\n"
+                f"Latest file: {raw_live.get('latest_file')}"
+            )
+            if args.dry_run:
+                print(message)
+            else:
+                print(json.dumps(notify_ha(ha_url, "Wakeword recording recovered", message, "wakeword_noise_recovered"), ensure_ascii=False, indent=2))
+            session["recovered_notification_sent_at"] = now_utc().isoformat()
+            changed = True
 
     if changed and not args.dry_run:
         save_json(args.session_file, session)

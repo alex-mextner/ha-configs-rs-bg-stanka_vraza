@@ -40,6 +40,8 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
 - continuous raw recorder подключен к тому же channel 0 mic stream через `wakeword_capture_ch0_record.sh`
 - live noise dataset пишется в `/home/ultra/oww-dataset/raw_live/YYYY-MM-DD/HHMMSS.wav`
 - weekly background-noise recording session started: `/home/ultra/oww-dataset/raw_live_session.json`
+- weekly background-noise recording completed: `2026-06-09T17:45:01Z`
+- final collected noise duration: `222.0614h` across `13327` raw live WAV files
 - watchdog cron runs every 15 minutes and sends HA notifications on completion/stall:
   `*/15 * * * * cd /home/ultra/homeassistant && scripts/wakeword_noise_watchdog.py check >> /tmp/wakeword_noise_watchdog.log 2>&1`
 - HA notification path tested: `persistent_notification.create` and `notify.notify` both returned OK
@@ -52,6 +54,10 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
   - capture wrapper loops forever and restarts the `arecord | tee` pipeline after failures
   - WAV segments are 60 seconds
   - WAV headers are refreshed and fsynced every 5 seconds, so abrupt interruption should lose at most the unsynced tail of the current segment, not prior segments
+- post-completion behavior:
+  - after `completion_notification_sent_at` is set in `/home/ultra/oww-dataset/raw_live_session.json`, the satellite mic wrapper falls back to pass-through capture and stops appending to `raw_live/`
+  - set `WAKEWORD_RECORD_AFTER_COMPLETE=1` only if another explicit noise-recording session is needed
+  - pass-through mode verified 2026-06-12: `wyoming-satellite` logs `completed session found ... without raw_live recording`
 
 Offline report по этому кандидату:
 
