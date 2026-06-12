@@ -1,14 +1,14 @@
 # Статус: кастомная wake word модель `ey_milosh`
 
-Дата обновления: 2026-06-02
+Дата обновления: 2026-06-12
 
 ## 1. Текущий статус
 
-Это не финально готовая wake word модель. Сейчас активирован только лучший offline-кандидат для live trial, чтобы начать собирать реальные false/true wake записи.
+Это не финально готовая wake word модель. Сейчас активирован исправленный live-trial кандидат, совместимый с реальным `pyopen_wakeword` runtime в `rhasspy/wyoming-openwakeword`.
 
 Что еще не сделано:
 
-- нет недельной записи домашнего шума как full streaming evaluation
+- full streaming evaluation по недельной записи домашнего шума запущен 2026-06-12 и еще выполняется
 - нет 50-100 реальных positive-записей голоса пользователя
 - нет размеченного live trial набора true wake / false wake
 - нет финального отчета по реальному recall/FPR на домашнем аудио
@@ -17,17 +17,28 @@
 
 - Активный файл: `/home/ultra/oww-models/ey_milosh.tflite`
 - Размер: 1849152 bytes
-- SHA256: `63d34d0fb9940014e220d639a9624ce4cbb86d6f47101c243bd4e7771649a56f`
+- SHA256: `9464893f1d25b9a1c6873a83145e43527b58998a1da3601abba7dffd62861cf8`
+- TFLite input shape: `[1, 16, 96]` (`pyopen_wakeword` deployment layout)
 - Порог в `ha.docker-compose.yaml`: `0.991`
 - Сервис: `wyoming-openwakeword`
 - Wake word name в satellite: `ey_milosh`
 - Backup V1: `/home/ultra/oww-models/backups/ey_milosh_v1_backup_20260601_130310.tflite`
 - Backup previous active V2: `/home/ultra/oww-models/ey_milosh.tflite.backup.20260602-190941`
+- Backup incompatible training-layout active file: `/home/ultra/oww-models/ey_milosh.tflite.backup.20260612-pre-pyopen-layout`
+- PyOpen-compatible iter7 artifact: `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/ey_milosh.pyopen.tflite`
 
-После замены 2026-06-02 пересоздан только wake service:
+Критическое исправление 2026-06-12:
+
+- предыдущий активный TFLite имел input shape `[1, 96, 16]`
+- `pyopen_wakeword` трактует вторую размерность как число временных окон, поэтому для `[1, 96, 16]` ожидал 96 окон при внутреннем буфере 80 и не выдавал model scores в live runtime
+- модель переложена в deployment layout `[1, 16, 96]`; первая dense-матрица транспонирована так, чтобы выход совпадал со старой моделью
+- equivalence check old-vs-new: `max_abs_diff=2.3841858e-07`
+- `wyoming-openwakeword` перезапущен, HA container не перезапускался
+
+После замены 2026-06-12 перезапущен только wake service:
 
 ```bash
-docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwakeword
+docker compose -f ha.docker-compose.yaml restart wyoming-openwakeword
 ```
 
 Проверено по логам:
@@ -58,6 +69,12 @@ docker compose -f ha.docker-compose.yaml up -d --force-recreate wyoming-openwake
   - after `completion_notification_sent_at` is set in `/home/ultra/oww-dataset/raw_live_session.json`, the satellite mic wrapper falls back to pass-through capture and stops appending to `raw_live/`
   - set `WAKEWORD_RECORD_AFTER_COMPLETE=1` only if another explicit noise-recording session is needed
   - pass-through mode verified 2026-06-12: `wyoming-satellite` logs `completed session found ... without raw_live recording`
+- full raw-live streaming evaluation:
+  - shard reports: `/home/ultra/oww-models/stream_eval/raw_live_2026-06-*.json`
+  - merged report target: `/home/ultra/oww-models/stream_eval/raw_live_merged.json`
+  - watcher container: `ww-eval-merge-wait`
+  - evaluator containers: `ww-eval-20260602` ... `ww-eval-20260611`
+  - runtime: `pyopen_wakeword`, thresholds `0.97,0.99,0.991,0.992,0.995,0.999`, refractory `2s` and `5s`
 
 Offline report по этому кандидату:
 
@@ -94,6 +111,10 @@ python3 scripts/wakeword_dataset_report.py --json
   - Added inline STT hard-negative mining: score debug STT candidate windows with a TFLite model, exclude overlap with deterministic STT test windows, and add only high-score windows as train negatives.
   - Threshold sweep now includes high-resolution `0.991..0.999` points for near-saturated models.
 - `scripts/wakeword_torch_to_tflite.py` - прямой конвертер DNN checkpoint -> Keras/TFLite.
+- `scripts/wakeword_patch_tflite_layout.py` - patches old `[1,96,context]` DNN TFLite into pyopen-compatible `[1,context,96]` without TensorFlow.
+- `scripts/wakeword_stream_eval.py` - pyopen runtime streaming false-positive evaluator for long raw WAV directories.
+- `scripts/wakeword_merge_stream_eval.py` - merges sharded streaming-eval JSON reports.
+- `scripts/wakeword_wait_merge_stream_eval.py` - waits for shard reports and writes merged report.
 - `scripts/wakeword_capture_ch0_record.sh` + `scripts/wakeword_channel0_tee.py` - live recorder: keeps feeding satellite while writing real mono WAV segments.
 - `scripts/wakeword_dataset_report.py` - reports raw live hours, debug recordings, curated real positives, and false wakes.
 - `scripts/wakeword_real_positive_session.py` - controlled real-user positive collection from Wyoming `*-wake.wav` files.
