@@ -181,6 +181,10 @@ def report(state: EvalState) -> dict[str, Any]:
             "p999": score_quantile(state.histogram, 0.999),
             "p9999": score_quantile(state.histogram, 0.9999),
         },
+        "score_histogram": {
+            "bins": len(state.histogram),
+            "counts": state.histogram,
+        },
         "raw_chunk_crossings": state.above_counts,
         "detections_with_refractory": detection_rows,
         "top_scores": serializable_top_scores(state),
