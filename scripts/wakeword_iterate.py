@@ -591,9 +591,22 @@ def predict_tflite_scores(model_path: Path, x: np.ndarray, batch_size: int) -> n
     input_details = interpreter.get_input_details()[0]
     input_index = input_details["index"]
     output_index = interpreter.get_output_details()[0]["index"]
+    input_shape = list(input_details["shape"])
+    if len(input_shape) != 3:
+        raise RuntimeError(f"unexpected TFLite input shape: {input_shape}")
+
+    if input_shape[1] == EMBEDDING_DIM:
+        layout = "training"
+    elif input_shape[2] == EMBEDDING_DIM:
+        layout = "pyopen"
+    else:
+        raise RuntimeError(f"unexpected TFLite input shape: {input_shape}")
+
     outputs = []
     for start in range(0, len(x), batch_size):
         xb = x[start : start + batch_size].astype(np.float32)
+        if layout == "pyopen":
+            xb = np.transpose(xb, (0, 2, 1))
         interpreter.resize_tensor_input(input_index, xb.shape, strict=False)
         interpreter.allocate_tensors()
         interpreter.set_tensor(input_index, xb)
@@ -608,9 +621,13 @@ def tflite_context_frames(model_path: Path) -> int:
     interpreter = tflite.Interpreter(model_path=str(model_path))
     input_details = interpreter.get_input_details()[0]
     shape = list(input_details["shape"])
-    if len(shape) != 3 or shape[1] != EMBEDDING_DIM:
+    if len(shape) != 3:
         raise RuntimeError(f"unexpected TFLite input shape: {shape}")
-    return int(shape[2])
+    if shape[1] == EMBEDDING_DIM:
+        return int(shape[2])
+    if shape[2] == EMBEDDING_DIM:
+        return int(shape[1])
+    raise RuntimeError(f"unexpected TFLite input shape: {shape}")
 
 
 def allocate_windows_by_duration(
@@ -1138,15 +1155,7 @@ def run_iterate(args: argparse.Namespace) -> None:
 
 
 def run_evaluate_tflite(args: argparse.Namespace) -> None:
-    import ai_edge_litert.interpreter as tflite
-
-    interpreter = tflite.Interpreter(model_path=str(args.model))
-    input_details = interpreter.get_input_details()[0]
-    shape = list(input_details["shape"])
-    if len(shape) != 3 or shape[1] != EMBEDDING_DIM:
-        raise RuntimeError(f"unexpected TFLite input shape: {shape}")
-
-    context_frames = int(shape[2])
+    context_frames = tflite_context_frames(args.model)
     items, discovery = discover_dataset(
         dataset_root=args.dataset_root,
         debug_root=args.debug_root,
@@ -1174,21 +1183,8 @@ def run_evaluate_tflite(args: argparse.Namespace) -> None:
         add_noise=False,
     )
 
-    def predict(x: np.ndarray) -> np.ndarray:
-        input_index = interpreter.get_input_details()[0]["index"]
-        output_index = interpreter.get_output_details()[0]["index"]
-        outputs = []
-        for start in range(0, len(x), args.batch_size):
-            xb = x[start : start + args.batch_size].astype(np.float32)
-            interpreter.resize_tensor_input(input_index, xb.shape, strict=False)
-            interpreter.allocate_tensors()
-            interpreter.set_tensor(input_index, xb)
-            interpreter.invoke()
-            outputs.append(interpreter.get_tensor(output_index).reshape(-1))
-        return np.concatenate(outputs, axis=0) if outputs else np.empty((0,), dtype=np.float32)
-
-    val_scores = predict(x_val)
-    test_scores = predict(x_test)
+    val_scores = predict_tflite_scores(args.model, x_val, args.batch_size)
+    test_scores = predict_tflite_scores(args.model, x_test, args.batch_size)
     clip_sec = context_samples(context_frames) / SR
     val_report = evaluate_scores(
         y_val,
