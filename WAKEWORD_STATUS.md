@@ -1,17 +1,16 @@
 # Статус: кастомная wake word модель `ey_milosh`
 
-Дата обновления: 2026-06-12
+Дата обновления: 2026-06-13
 
 ## 1. Текущий статус
 
-Это не финально готовая wake word модель. Сейчас активирован исправленный live-trial кандидат, совместимый с реальным `pyopen_wakeword` runtime в `rhasspy/wyoming-openwakeword`.
+Это не финально готовая wake word модель, потому что еще нет реальных positive-записей голоса пользователя. Но текущий live-trial кандидат уже совместим с реальным `pyopen_wakeword` runtime в `rhasspy/wyoming-openwakeword` и прошел full streaming negative evaluation на недельной записи домашнего шума.
 
 Что еще не сделано:
 
-- full streaming evaluation по недельной записи домашнего шума запущен 2026-06-12 и еще выполняется
 - нет 50-100 реальных positive-записей голоса пользователя
 - нет размеченного live trial набора true wake / false wake
-- нет финального отчета по реальному recall/FPR на домашнем аудио
+- нет финального отчета по реальному recall на голосе пользователя
 
 Текущий live-trial candidate:
 
@@ -69,12 +68,15 @@ docker compose -f ha.docker-compose.yaml restart wyoming-openwakeword
   - after `completion_notification_sent_at` is set in `/home/ultra/oww-dataset/raw_live_session.json`, the satellite mic wrapper falls back to pass-through capture and stops appending to `raw_live/`
   - set `WAKEWORD_RECORD_AFTER_COMPLETE=1` only if another explicit noise-recording session is needed
   - pass-through mode verified 2026-06-12: `wyoming-satellite` logs `completed session found ... without raw_live recording`
-- full raw-live streaming evaluation:
+- full raw-live streaming evaluation completed 2026-06-13:
   - shard reports: `/home/ultra/oww-models/stream_eval/raw_live_2026-06-*.json`
-  - merged report target: `/home/ultra/oww-models/stream_eval/raw_live_merged.json`
-  - watcher container: `ww-eval-merge-wait`
-  - evaluator containers: `ww-eval-20260602` ... `ww-eval-20260611`
+  - merged report: `/home/ultra/oww-models/stream_eval/raw_live_merged.json`
+  - processed: `13327/13327` WAV files, `222.2163h`
   - runtime: `pyopen_wakeword`, thresholds `0.97,0.99,0.991,0.992,0.995,0.999`, refractory `2s` and `5s`
+  - max score: `0.01971021667122841`
+  - threshold crossings: `0` for every tested threshold
+  - detections: `0` for every tested threshold/refractory pair
+  - measured background-noise FPR: `0.0/h` at active threshold `0.991`
 
 Offline report по этому кандидату:
 
@@ -400,10 +402,9 @@ Artifacts:
 Ограничения:
 
 1. Нет реальных positive-записей пользователя. Recall сейчас измерен на synthetic Piper voices.
-2. STT negatives взяты sampled windows, а не полным 7-day streaming-прогоном.
-3. FPR/hour оценен по 1.99s windows; это приближение, не полная имитация `pyopen_wakeword` streaming + refractory.
-4. `raw_live/` recorder включен только 2026-06-02; недельного negative/noise набора еще нет.
-5. GRU16 показал лучшие offline-метрики, но пока не конвертирован и не проверен как TFLite.
+2. STT/debug negatives в training audit все еще взяты sampled windows; full streaming audit сделан отдельно только по `raw_live/`.
+3. Full `raw_live/` streaming evaluation показал `0.0` false wakes/hour, но это negative-only фоновый набор. Он не заменяет real-positive recall тест.
+4. GRU16 показал лучшие offline-метрики, но пока не конвертирован и не проверен как TFLite.
 
 ## 6. Следующий цикл
 
@@ -413,11 +414,7 @@ Artifacts:
    - считать новые `*-wake.wav` в `/home/ultra/wyoming-debug/`
    - вручную пометить true wake / false wake
    - добавить false wakes в hard negatives
-2. Дать `raw_live/` recorder накопить минимум 7 дней домашнего шума:
-   - проверить рост `/home/ultra/oww-dataset/raw_live/`
-   - считать FPR через full streaming evaluation, а не только sampled windows
-   - во время этой записи не произносить activation phrase; любые wake hits за этот период считать false-wake candidates до ручной проверки
-3. Записать 50-100 реальных positives:
+2. Записать 50-100 реальных positives:
    - `эй Милош`
    - `Милош`
    - разные расстояния, шум ТВ, обычная речь
@@ -427,11 +424,11 @@ Artifacts:
      # Say the phrase 50 times near the satellite.
      python3 scripts/wakeword_real_positive_session.py finish
      ```
-4. Сделать full streaming evaluation:
-   - прогонять `.tflite` через `pyopen_wakeword`
-   - учитывать refractory seconds и trigger-level
-   - считать detections/hour на длинных STT/debug записях
-5. Проверить GRU16 TFLite feasibility:
+3. Разметить live trial wake/debug записи:
+   - true wake
+   - false wake
+   - missed wake
+4. Проверить GRU16 TFLite feasibility:
    - если Keras GRU conversion пройдет и pyopen_wakeword примет модель, сравнить live с DNN.
 
 ## 7. Команды воспроизведения
