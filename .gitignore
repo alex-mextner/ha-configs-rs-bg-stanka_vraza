@@ -32,7 +32,10 @@ visualize_graph.py
 .image/
 image/
 tts/
-www/
+www/*
+!www/wakeword/
+www/wakeword/*
+!www/wakeword/wakeword-collection-card.js
 backups/
 *.log
 *.log.*
