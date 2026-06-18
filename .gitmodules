@@ -46,3 +46,9 @@
 [submodule "submodules/ha-cover-time-based"]
 	path = submodules/ha-cover-time-based
 	url = https://github.com/Sese-Schneider/ha-cover-time-based.git
+[submodule "submodules/moonraker-home-assistant"]
+	path = submodules/moonraker-home-assistant
+	url = https://github.com/marcolivierarsenault/moonraker-home-assistant.git
+[submodule "submodules/webrtc-camera"]
+	path = submodules/webrtc-camera
+	url = https://github.com/AlexxIT/WebRTC.git

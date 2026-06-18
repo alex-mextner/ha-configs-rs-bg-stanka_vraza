@@ -19,6 +19,7 @@ usage_prediction:
 usb:
 webhook:
 zeroconf:
+webrtc:
 
 # Load frontend themes from the themes folder
 frontend:
@@ -44,6 +45,20 @@ ingress:
     title: Music Assistant
     icon: mdi:music-box
     url: http://music-assistant:8095
+    work_mode: ingress
+    ui_mode: normal
+  k1_se_printer:
+    require_admin: true
+    title: K1 SE
+    icon: mdi:printer-3d
+    url: http://printer-proxy:8080/k1se
+    work_mode: ingress
+    ui_mode: normal
+  u1_printer:
+    require_admin: true
+    title: U1
+    icon: mdi:printer-3d-nozzle
+    url: http://printer-proxy:8080/u1
     work_mode: ingress
     ui_mode: normal
 
@@ -117,7 +132,15 @@ lovelace:
   resources:
     - url: /local/wakeword/wakeword-collection-card.js?v=20260618b
       type: module
+    - url: /webrtc/webrtc-camera.js?v=3.6.1
+      type: module
   dashboards:
+    3d-printers:
+      mode: yaml
+      title: 3D Printers
+      icon: mdi:printer-3d
+      show_in_sidebar: true
+      filename: ui-3d-printers.yaml
     system-metrics:
       mode: yaml
       title: System & Metrics
