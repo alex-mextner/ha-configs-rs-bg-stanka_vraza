@@ -6,6 +6,7 @@ services:
       - /run/dbus:/run/dbus:ro
       - /etc/localtime:/etc/localtime:ro
       - /home/ultra/wyoming-debug:/config/wyoming-debug
+      - /home/ultra/oww-dataset:/config/oww-dataset
     ports:
       - "8123:8123"
     restart: unless-stopped
