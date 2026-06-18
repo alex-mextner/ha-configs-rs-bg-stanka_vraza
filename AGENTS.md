@@ -414,7 +414,9 @@ A YAML syntax error in `packages/voice_conversation_log.yaml` (improperly escape
 ### Rules enforced from now on
 - **Always validate YAML before committing or reloading HA.** Run `python3 -c "import yaml; yaml.safe_load(open('FILE.yaml'))"` on every changed `.yaml` file.
 - **Use `./scripts/ha_safe_reload.sh` instead of raw `docker restart`.** It validates all YAML files first and aborts if any are invalid.
-- **Pre-commit hook validates YAML automatically.** `.githooks/pre-commit` is tracked in git and runs `scripts/ha_validate_yaml.sh` on every staged `.yaml` file, including HA tags such as `!include` and `!secret`.
+- **Pre-commit hook validates YAML and Lovelace automatically.** `.githooks/pre-commit` is tracked in git and runs:
+  - `scripts/ha_validate_yaml.sh` on every staged `.yaml` file, including HA tags such as `!include` and `!secret`.
+  - `scripts/ha_validate_lovelace.sh` when `configuration.yaml`, `ui-*.yaml`, Lovelace `www/*.js` resources, or hook validation scripts are staged. It checks dashboard structure, panel/card shape, declared dashboard files, `/local/...` resource files, and custom-card resource matches.
 - **Enable tracked hooks after clone:** `git config core.hooksPath .githooks`.
 - **Never use `"\n"` inside inline YAML quoted strings.** Use YAML block scalars (`|` or `>`) or Jinja `{% set %}` blocks for multiline content.
 - **Test one package at a time.** After adding a new `packages/*.yaml`, reload only that package via **Developer Tools → YAML → Check and reload** before full container restart.
@@ -424,7 +426,7 @@ A YAML syntax error in `packages/voice_conversation_log.yaml` (improperly escape
 File: `scripts/ha_safe_reload.sh` — validates YAML then restarts HA container.
 
 ### Pre-commit hook  
-File: `.githooks/pre-commit` — validates staged `.yaml` files via `scripts/ha_validate_yaml.sh` before allowing commit. Enable it with `git config core.hooksPath .githooks`.
+File: `.githooks/pre-commit` — validates staged `.yaml` files via `scripts/ha_validate_yaml.sh` and Lovelace dashboards/resources via `scripts/ha_validate_lovelace.sh` before allowing commit. Enable it with `git config core.hooksPath .githooks`.
 
 ## agent-browser CLI
 

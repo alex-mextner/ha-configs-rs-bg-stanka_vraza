@@ -6,21 +6,49 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-mapfile -t YAML_FILES < <(
-    git diff --cached --name-only --diff-filter=ACMR | grep -E '\.ya?ml$' || true
+mapfile -t STAGED_FILES < <(
+    git diff --cached --name-only --diff-filter=ACMR
 )
 
-if [ "${#YAML_FILES[@]}" -eq 0 ]; then
+YAML_FILES=()
+LOVELACE_FILES=()
+
+for file in "${STAGED_FILES[@]}"; do
+    if [[ "$file" =~ \.ya?ml$ ]]; then
+        YAML_FILES+=("$file")
+    fi
+
+    case "$file" in
+        configuration.yaml|ui-*.yaml|ui-*.yml|www/*.js|scripts/ha_validate_lovelace.*|.githooks/pre-commit)
+            LOVELACE_FILES+=("$file")
+            ;;
+    esac
+done
+
+if [ "${#YAML_FILES[@]}" -eq 0 ] && [ "${#LOVELACE_FILES[@]}" -eq 0 ]; then
     exit 0
 fi
 
-echo "[pre-commit] Validating YAML files..."
+if [ "${#YAML_FILES[@]}" -gt 0 ]; then
+    echo "[pre-commit] Validating YAML files..."
 
-if ! scripts/ha_validate_yaml.sh "${YAML_FILES[@]}"; then
-    echo ""
-    echo "COMMIT ABORTED: Fix YAML errors first."
-    echo "Check: scripts/ha_validate_yaml.sh FILE.yaml"
-    exit 1
+    if ! scripts/ha_validate_yaml.sh "${YAML_FILES[@]}"; then
+        echo ""
+        echo "COMMIT ABORTED: Fix YAML errors first."
+        echo "Check: scripts/ha_validate_yaml.sh FILE.yaml"
+        exit 1
+    fi
 fi
 
-echo "[pre-commit] All YAML files valid. Proceeding with commit."
+if [ "${#LOVELACE_FILES[@]}" -gt 0 ]; then
+    echo "[pre-commit] Validating Lovelace dashboards..."
+
+    if ! scripts/ha_validate_lovelace.sh "${LOVELACE_FILES[@]}"; then
+        echo ""
+        echo "COMMIT ABORTED: Fix Lovelace dashboard/resource errors first."
+        echo "Check: scripts/ha_validate_lovelace.sh FILE"
+        exit 1
+    fi
+fi
+
+echo "[pre-commit] HA YAML/Lovelace checks passed. Proceeding with commit."
