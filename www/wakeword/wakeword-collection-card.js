@@ -1004,18 +1004,22 @@ class WakewordCollectionCard extends HTMLElement {
 
   escape(value) {
     return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 }
 
-customElements.define("wakeword-collection-card", WakewordCollectionCard);
+if (!customElements.get("wakeword-collection-card")) {
+  customElements.define("wakeword-collection-card", WakewordCollectionCard);
+}
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "wakeword-collection-card",
-  name: "Wakeword Collection Card",
-  preview: false,
-  description: "Guided wake word positive dataset collection for Home Assistant.",
-});
+if (!window.customCards.some((card) => card.type === "wakeword-collection-card")) {
+  window.customCards.push({
+    type: "wakeword-collection-card",
+    name: "Wakeword Collection Card",
+    preview: false,
+    description: "Guided wake word positive dataset collection for Home Assistant.",
+  });
+}

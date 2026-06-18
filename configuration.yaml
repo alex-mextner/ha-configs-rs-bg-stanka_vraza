@@ -115,7 +115,7 @@ homeassistant:
 
 lovelace:
   resources:
-    - url: /local/wakeword/wakeword-collection-card.js?v=20260618a
+    - url: /local/wakeword/wakeword-collection-card.js?v=20260618b
       type: module
   dashboards:
     system-metrics:
