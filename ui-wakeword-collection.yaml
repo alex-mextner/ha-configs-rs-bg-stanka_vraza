@@ -3,6 +3,62 @@ views:
   - title: Collection
     path: collection
     icon: mdi:account-voice
+    cards:
+      - type: markdown
+        title: "Милош: запись обучающих фраз"
+        content: >
+          Откройте вкладку **Studio** для красивого пошагового интерфейса.
+          Эта вкладка оставлена как надежный fallback на встроенных карточках
+          Home Assistant: если телефон не загрузил custom-card, запись все
+          равно можно провести отсюда.
+
+          Перед блоком выберите фразу, говорящего, стиль, место/шум и число
+          попыток. Затем нажмите **Wakeword start session**, произносите фразу
+          с паузой 3-5 секунд и завершите блок кнопкой
+          **Wakeword finish session**.
+
+      - type: entities
+        title: Session controls
+        show_header_toggle: false
+        entities:
+          - entity: input_number.wakeword_collection_plan_step
+          - entity: input_select.wakeword_collection_phrase
+          - entity: input_select.wakeword_collection_speaker
+          - entity: input_select.wakeword_collection_style
+          - entity: input_select.wakeword_collection_location
+          - entity: input_number.wakeword_collection_expected_attempts
+          - entity: input_text.wakeword_collection_notes
+          - entity: input_button.wakeword_collection_show_guide
+          - entity: input_button.wakeword_collection_start
+          - entity: input_button.wakeword_collection_finish
+
+      - type: entities
+        title: Progress
+        show_header_toggle: false
+        entities:
+          - entity: input_boolean.wakeword_collection_active
+          - entity: sensor.wakeword_positive_session
+          - entity: sensor.wakeword_collection_progress
+          - entity: counter.wakeword_collection_blocks_done
+          - entity: sensor.debug_recording_count
+          - entity: sensor.latest_debug_recording
+
+      - type: markdown
+        title: Минимальный набор
+        content: >
+          1. Владелец, тихо: 30 раз "эй Милош", 20 раз "Милош".
+
+          2. Владелец, расстояние: 20 раз с дивана или из коридора.
+
+          3. Голос: 10 шепотом, 10 громко, 10 усталым/низким голосом.
+
+          4. Шум: 20 раз с ТВ/музыкой, 20 раз на кухне или в шумной комнате.
+
+          5. Другие люди: 20-30 раз на человека.
+
+  - title: Studio
+    path: studio
+    icon: mdi:microphone-message
     panel: true
     cards:
       - type: custom:wakeword-collection-card
