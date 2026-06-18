@@ -182,17 +182,17 @@ template:
         state: >
           {% set files = states('sensor.debug_files_list') | default('') %}
           {% if files %}
-            {{ files.split(',') | last }}
+            {{ files.split(',') | first }}
           {% else %}
             none
           {% endif %}
         attributes:
           folder: "/home/ultra/wyoming-debug"
-          count: "{{ (states('sensor.debug_files_list') | default('')).split(',') | length }}"
+          listed_count: "{{ (states('sensor.debug_files_list') | default('')).split(',') | length }}"
 
 # ── Shell commands to restart voice services with new settings ──
 shell_command:
-  voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-porcupine1 wyoming-satellite"
+  voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-openwakeword wyoming-satellite"
   voice_restart_satellite: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
@@ -389,16 +389,16 @@ command_line:
       value_template: "{{ value }}"
 
   - sensor:
-      name: "Wyoming Porcupine1 Health"
+      name: "Wyoming OpenWakeWord Health"
       unique_id: wyoming_porcupine1_health
-      command: "nc -z wyoming-porcupine1 10400 && echo running || echo stopped"
+      command: "nc -z wyoming-openwakeword 10400 && echo running || echo stopped"
       scan_interval: 30
       value_template: "{{ value }}"
 
   - sensor:
       name: "Debug Files List"
       unique_id: debug_files_list
-      command: "ls -1 /config/wyoming-debug/*.wav 2>/dev/null | sed 's|/config/wyoming-debug/||' | paste -sd ',' - || echo ''"
+      command: "ls -1t /config/wyoming-debug/*.wav 2>/dev/null | head -n 8 | sed 's|/config/wyoming-debug/||' | paste -sd ',' - || echo ''"
       scan_interval: 30
       value_template: "{{ value }}"
 
