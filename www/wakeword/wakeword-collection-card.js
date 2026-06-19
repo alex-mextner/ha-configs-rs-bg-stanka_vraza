@@ -153,6 +153,7 @@ const ROOM_POINTS = [
 class WakewordCollectionCard extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
+    this.reviewManifestUrl = this.config.review_manifest_url || "/local/wakeword/wakeword-sample-candidates.json";
   }
 
   set hass(hass) {
@@ -173,6 +174,11 @@ class WakewordCollectionCard extends HTMLElement {
       this.attachShadow({ mode: "open" });
       this.render();
     }
+    this.loadReviewManifest();
+  }
+
+  disconnectedCallback() {
+    this.pauseReviewPlaylist();
   }
 
   state(entityId) {
@@ -233,6 +239,152 @@ class WakewordCollectionCard extends HTMLElement {
 
   async refreshSession() {
     await this.call("homeassistant", "update_entity", { entity_id: "sensor.wakeword_positive_session" });
+    await this.loadReviewManifest(true);
+  }
+
+  async loadReviewManifest(force = false) {
+    if (this.reviewLoading || (!force && this.reviewLoaded)) return;
+    this.reviewLoading = true;
+    this.reviewError = "";
+    this.renderReview();
+    try {
+      const manifestUrl = this.getReviewManifestUrl();
+      const separator = manifestUrl.includes("?") ? "&" : "?";
+      const response = await fetch(`${manifestUrl}${separator}t=${Date.now()}`, { cache: "no-store" });
+      if (response.status === 404) {
+        this.reviewSamples = [];
+        this.reviewLoaded = true;
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const rawSamples = Array.isArray(data) ? data : (data.samples || data.candidates || data.items || []);
+      this.reviewSamples = rawSamples
+        .map((sample, index) => this.normalizeReviewSample(sample, index))
+        .filter((sample) => sample.url && !this.deletedReviewSamples().has(sample.id));
+      this.reviewLoaded = true;
+    } catch (error) {
+      this.reviewSamples = [];
+      this.reviewLoaded = true;
+      this.reviewError = error?.message || String(error);
+    } finally {
+      this.reviewLoading = false;
+      this.renderReview();
+    }
+  }
+
+  normalizeReviewSample(sample, index) {
+    const rawUrl = sample.url || sample.path || "";
+    const label = sample.label || sample.phrase || sample.text || "candidate";
+    const detected = sample.detected_by_model;
+    const missed = sample.missed_by_model === true || (detected === false && this.isShortPhrase(label));
+    return {
+      id: String(sample.id || sample.path || sample.url || `sample-${index}`),
+      url: this.normalizeReviewUrl(rawUrl),
+      label: String(label),
+      duration: Number(sample.duration ?? sample.duration_s ?? 0),
+      score: Number(sample.score ?? sample.model_score ?? NaN),
+      detectedByModel: detected === undefined ? undefined : Boolean(detected),
+      missedByModel: Boolean(missed),
+      path: String(sample.path || sample.url || ""),
+    };
+  }
+
+  getReviewManifestUrl() {
+    return this.reviewManifestUrl || this.config?.review_manifest_url || "/local/wakeword/wakeword-sample-candidates.json";
+  }
+
+  normalizeReviewUrl(rawUrl) {
+    const url = String(rawUrl || "");
+    if (!url) return "";
+    if (/^(https?:)?\/\//.test(url) || url.startsWith("/local/")) return url;
+    if (url.startsWith("/config/www/")) return `/local/${url.slice("/config/www/".length)}`;
+    if (url.startsWith("/home/ultra/homeassistant/www/")) return `/local/${url.slice("/home/ultra/homeassistant/www/".length)}`;
+    if (url.startsWith("www/")) return `/local/${url.slice(4)}`;
+    return url.startsWith("/") ? url : `/local/${url}`;
+  }
+
+  isShortPhrase(label) {
+    const normalized = String(label || "").trim().toLowerCase();
+    return normalized === "милош" || normalized === "milos" || normalized === "milosh";
+  }
+
+  deletedReviewSamples() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("wakewordReviewDeleted") || "[]"));
+    } catch (_err) {
+      return new Set();
+    }
+  }
+
+  storeDeletedReviewSamples(deleted) {
+    localStorage.setItem("wakewordReviewDeleted", JSON.stringify([...deleted]));
+  }
+
+  reviewVisibleSamples() {
+    return this.reviewSamples || [];
+  }
+
+  async toggleReviewPlaylist() {
+    if (this.reviewPlaying) {
+      this.pauseReviewPlaylist();
+      return;
+    }
+    const samples = this.reviewVisibleSamples();
+    if (!samples.length) return;
+    const nextIndex = this.reviewIndex >= 0 && this.reviewIndex < samples.length ? this.reviewIndex : 0;
+    await this.playReviewSample(nextIndex, true);
+  }
+
+  async playReviewSample(index, continuePlaylist = false) {
+    const samples = this.reviewVisibleSamples();
+    if (!samples[index]) return;
+    clearTimeout(this.reviewTimer);
+    this.reviewAudio = this.reviewAudio || new Audio();
+    this.reviewAudio.onended = () => {
+      this.reviewPlaying = false;
+      this.renderReview();
+      if (continuePlaylist) {
+        this.reviewTimer = setTimeout(() => this.playReviewSample(index + 1, true), 500);
+      }
+    };
+    this.reviewAudio.onerror = () => {
+      this.reviewPlaying = false;
+      this.renderReview();
+      if (continuePlaylist) {
+        this.reviewTimer = setTimeout(() => this.playReviewSample(index + 1, true), 500);
+      }
+    };
+    this.reviewIndex = index;
+    this.reviewPlaying = true;
+    this.reviewAudio.src = samples[index].url;
+    this.reviewAudio.currentTime = 0;
+    this.renderReview();
+    try {
+      await this.reviewAudio.play();
+    } catch (error) {
+      this.reviewPlaying = false;
+      this.reviewError = error?.message || String(error);
+      this.renderReview();
+    }
+  }
+
+  pauseReviewPlaylist() {
+    clearTimeout(this.reviewTimer);
+    this.reviewPlaying = false;
+    this.reviewAudio?.pause();
+    this.renderReview();
+  }
+
+  deleteReviewSample(sampleId) {
+    const deleted = this.deletedReviewSamples();
+    deleted.add(sampleId);
+    this.storeDeletedReviewSamples(deleted);
+    const wasCurrent = this.reviewVisibleSamples()[this.reviewIndex]?.id === sampleId;
+    this.reviewSamples = (this.reviewSamples || []).filter((sample) => sample.id !== sampleId);
+    if (wasCurrent) this.pauseReviewPlaylist();
+    this.reviewIndex = Math.min(this.reviewIndex || 0, Math.max(0, this.reviewVisibleSamples().length - 1));
+    this.renderReview();
   }
 
   soundEnabled() {
@@ -572,6 +724,105 @@ class WakewordCollectionCard extends HTMLElement {
           opacity: 0.45;
           cursor: not-allowed;
         }
+        .review-head {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 12px;
+          align-items: center;
+        }
+        .review-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+        .review-list {
+          display: grid;
+          gap: 8px;
+          margin-top: 12px;
+          max-height: 440px;
+          overflow: auto;
+          padding-right: 2px;
+        }
+        .sample {
+          display: grid;
+          grid-template-columns: 44px minmax(0, 1fr) auto;
+          gap: 10px;
+          align-items: center;
+          border: 1px solid var(--ww-line);
+          background: rgba(255, 255, 255, 0.72);
+          border-radius: 8px;
+          padding: 9px;
+        }
+        .sample.missed {
+          border-color: rgba(200, 77, 66, 0.55);
+          background: rgba(200, 77, 66, 0.10);
+        }
+        .sample.playing {
+          border-color: rgba(20, 124, 140, 0.62);
+          box-shadow: inset 3px 0 0 var(--ww-teal);
+        }
+        .sample-main {
+          min-width: 0;
+        }
+        .sample-title {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          align-items: center;
+          color: var(--ww-ink);
+          font-weight: 850;
+          line-height: 1.25;
+        }
+        .sample-path {
+          color: var(--ww-muted);
+          font-size: 11px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          margin-top: 3px;
+        }
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 20px;
+          border-radius: 999px;
+          border: 1px solid var(--ww-line);
+          padding: 0 7px;
+          font-size: 11px;
+          font-weight: 850;
+          background: rgba(255, 255, 255, 0.78);
+          color: var(--ww-muted);
+        }
+        .badge.missed {
+          color: var(--ww-coral);
+          border-color: rgba(200, 77, 66, 0.38);
+          background: rgba(200, 77, 66, 0.11);
+        }
+        .badge.detected {
+          color: var(--ww-good);
+          border-color: rgba(15, 143, 100, 0.34);
+          background: rgba(15, 143, 100, 0.10);
+        }
+        .icon-btn {
+          width: 40px;
+          min-width: 40px;
+          padding: 0;
+          justify-content: center;
+        }
+        .sample-buttons {
+          display: flex;
+          gap: 7px;
+        }
+        .empty {
+          margin-top: 12px;
+          border: 1px dashed var(--ww-line);
+          border-radius: 8px;
+          padding: 16px;
+          color: var(--ww-muted);
+          background: rgba(255, 255, 255, 0.50);
+          line-height: 1.4;
+        }
         .plan-list {
           display: grid;
           gap: 7px;
@@ -728,12 +979,16 @@ class WakewordCollectionCard extends HTMLElement {
           .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .ring { margin: 0 auto; }
+          .review-head { grid-template-columns: 1fr; }
+          .review-actions { justify-content: flex-start; }
         }
         @media (max-width: 520px) {
           .wrap { padding: 12px; }
           .metrics, .controls { grid-template-columns: 1fr; }
           h1 { font-size: 21px; }
           .phrase { font-size: 38px; }
+          .sample { grid-template-columns: 40px minmax(0, 1fr); }
+          .sample-buttons { grid-column: 1 / -1; justify-content: flex-end; }
         }
       </style>
       <ha-card>
@@ -827,6 +1082,20 @@ class WakewordCollectionCard extends HTMLElement {
               </div>
             </div>
           </div>
+
+          <div class="panel" style="margin-top:16px">
+            <div class="review-head">
+              <div>
+                <div class="eyebrow">Review wake samples</div>
+                <div class="subtitle" id="reviewSubtitle"></div>
+              </div>
+              <div class="review-actions">
+                <button id="reviewPlaylistBtn"><ha-icon icon="mdi:play"></ha-icon>Play</button>
+                <button id="reviewRefreshBtn"><ha-icon icon="mdi:refresh"></ha-icon>Refresh</button>
+              </div>
+            </div>
+            <div id="reviewBody"></div>
+          </div>
         </div>
       </ha-card>
     `;
@@ -866,6 +1135,8 @@ class WakewordCollectionCard extends HTMLElement {
     $("prevStep").addEventListener("click", () => this.selectPlanStep(this.currentPlanIndex() - 1));
     $("nextStep").addEventListener("click", () => this.selectPlanStep(this.currentPlanIndex() + 1));
     $("applyStep").addEventListener("click", () => this.applyStep(WAKEWORD_PLAN[this.currentPlanIndex()]));
+    $("reviewPlaylistBtn").addEventListener("click", () => this.toggleReviewPlaylist());
+    $("reviewRefreshBtn").addEventListener("click", () => this.loadReviewManifest(true));
   }
 
   currentPlanIndex() {
@@ -897,6 +1168,79 @@ class WakewordCollectionCard extends HTMLElement {
     room.querySelectorAll(".point").forEach((node) => {
       node.addEventListener("click", () => this.setSelect("input_select.wakeword_collection_location", node.dataset.location));
     });
+  }
+
+  renderReview() {
+    if (!this.shadowRoot) return;
+    const body = this.shadowRoot.getElementById("reviewBody");
+    const subtitle = this.shadowRoot.getElementById("reviewSubtitle");
+    const playlistBtn = this.shadowRoot.getElementById("reviewPlaylistBtn");
+    if (!body || !subtitle || !playlistBtn) return;
+
+    const samples = this.reviewVisibleSamples();
+    const missedCount = samples.filter((sample) => sample.missedByModel).length;
+    subtitle.textContent = this.reviewLoading
+      ? "Загружаю manifest кандидатов..."
+      : `${samples.length} фрагментов, ${missedCount} требуют внимания: короткая фраза есть, модель ее не распознала.`;
+    playlistBtn.disabled = !samples.length;
+    playlistBtn.innerHTML =
+      `<ha-icon icon="${this.reviewPlaying ? "mdi:pause" : "mdi:play"}"></ha-icon>${this.reviewPlaying ? "Pause" : "Play"}`;
+
+    if (this.reviewLoading) {
+      body.innerHTML = `<div class="empty">Manifest загружается из ${this.escape(this.getReviewManifestUrl())}.</div>`;
+      return;
+    }
+    if (!samples.length) {
+      const details = this.reviewError
+        ? `Manifest недоступен (${this.reviewError}).`
+        : "Manifest пока отсутствует или в нем нет кандидатов.";
+      body.innerHTML = `<div class="empty">${this.escape(details)} Когда другой агент создаст JSON со списком samples, они появятся здесь автоматически после Refresh.</div>`;
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="review-list">
+        ${samples.map((sample, index) => this.renderReviewSample(sample, index)).join("")}
+      </div>
+    `;
+    body.querySelectorAll("[data-review-play]").forEach((button) => {
+      button.addEventListener("click", () => this.playReviewSample(Number(button.dataset.reviewPlay), false));
+    });
+    body.querySelectorAll("[data-review-delete]").forEach((button) => {
+      button.addEventListener("click", () => this.deleteReviewSample(button.dataset.reviewDelete));
+    });
+  }
+
+  renderReviewSample(sample, index) {
+    const playing = this.reviewPlaying && this.reviewIndex === index;
+    const score = Number.isFinite(sample.score) ? sample.score.toFixed(3) : "n/a";
+    const duration = sample.duration > 0 ? `${sample.duration.toFixed(2)}s` : "duration n/a";
+    const detectedBadge = sample.missedByModel
+      ? `<span class="badge missed">missed by model</span>`
+      : sample.detectedByModel === true
+        ? `<span class="badge detected">detected</span>`
+        : `<span class="badge">not detected</span>`;
+    return `
+      <div class="sample ${sample.missedByModel ? "missed" : ""} ${playing ? "playing" : ""}">
+        <button class="icon-btn" title="Play sample" data-review-play="${index}">
+          <ha-icon icon="${playing ? "mdi:volume-high" : "mdi:play"}"></ha-icon>
+        </button>
+        <div class="sample-main">
+          <div class="sample-title">
+            <span>${this.escape(sample.label)}</span>
+            ${detectedBadge}
+            <span class="badge">${this.escape(duration)}</span>
+            <span class="badge">score ${this.escape(score)}</span>
+          </div>
+          <div class="sample-path">${this.escape(sample.path || sample.url)}</div>
+        </div>
+        <div class="sample-buttons">
+          <button class="icon-btn" title="Hide from review queue" data-review-delete="${this.escape(sample.id)}">
+            <ha-icon icon="mdi:delete-outline"></ha-icon>
+          </button>
+        </div>
+      </div>
+    `;
   }
 
   update() {
@@ -962,6 +1306,7 @@ class WakewordCollectionCard extends HTMLElement {
     });
     this.updateDirection(location);
     this.updateMicOnly();
+    this.renderReview();
   }
 
   updateDirection(location) {

@@ -63,6 +63,7 @@ views:
     cards:
       - type: custom:wakeword-collection-card
         direction_entity: sensor.wakeword_mic_direction
+        review_manifest_url: /local/wakeword/wakeword-sample-candidates.json
 
   - title: Raw controls
     path: raw
