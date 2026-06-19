@@ -184,7 +184,7 @@ services:
         "--snd-command", "aplay -D plughw:1,0 -r 22050 -c 1 -f S16_LE -t raw",
         "--wake-uri", "tcp://wyoming-openwakeword:10400",
         "--wake-word-name", "ey_milosh",
-        "--detection-command", "aplay -D plughw:1,0 /app/sounds/awake.wav",
+        "--awake-wav", "/app/sounds/awake.wav",
         "--tts-played-command", "aplay -D plughw:1,0 /app/sounds/done.wav",
         "--mic-noise-suppression", "3",
         "--mic-auto-gain", "15",
