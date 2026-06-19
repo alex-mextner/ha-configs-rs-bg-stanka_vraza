@@ -1,6 +1,6 @@
 # Статус: кастомная wake word модель `ey_milosh`
 
-Дата обновления: 2026-06-13
+Дата обновления: 2026-06-19
 
 ## 1. Текущий статус
 
@@ -122,6 +122,53 @@ python3 scripts/wakeword_dataset_report.py --json
 - `scripts/wakeword_real_positive_session.py` - controlled real-user positive collection from Wyoming `*-wake.wav` files.
 - `scripts/wakeword_noise_watchdog.py` - tracks the 168 recorded-hour noise session and notifies HA when complete or stalled.
 - `scripts/install_wakeword_noise_cron.sh` - idempotently installs the current-user watchdog cron.
+- `scripts/wakeword_smoke_manifest.py` - dependency-light offline smoke train/eval plus short voice-like fragment mining and UI-ready manifest output.
+
+### Smoke train/eval и manifest, 2026-06-19
+
+Добавлен отдельный smoke-инструмент для ситуации, когда нужно быстро получить
+хоть какие-то wake-срабатывания без сети, TensorFlow, `pyopen_wakeword` и
+training container. Это не production openWakeWord-модель и не замена активного
+`/home/ultra/oww-models/ey_milosh.tflite`; это быстрый локальный прототипный
+скорер на stdlib+numpy для triage и UI/review manifest.
+
+Команда полного smoke-прогона:
+
+```bash
+scripts/wakeword_smoke_manifest.py all \
+  --model-output /home/ultra/oww-models/smoke/ey_milosh_smoke_model.json \
+  --report /home/ultra/oww-models/smoke/smoke_train_eval_report.json \
+  --audio-root /home/ultra/wyoming-debug \
+  --output /home/ultra/oww-models/smoke/short_wake_fragments_manifest.json \
+  --clip-root /home/ultra/oww-models/smoke/short_wake_fragments \
+  --max-files 80 \
+  --max-candidates 120
+```
+
+Текущий smoke-прогон:
+
+- модель: `/home/ultra/oww-models/smoke/ey_milosh_smoke_model.json`
+- train/eval report: `/home/ultra/oww-models/smoke/smoke_train_eval_report.json`
+- выбранный smoke threshold: `0.4`
+- test positives detected: `62/64`
+- short-fragment manifest: `/home/ultra/oww-models/smoke/short_wake_fragments_manifest.json`
+- clips: `/home/ultra/oww-models/smoke/short_wake_fragments/`
+- scan slice: `80` newest WAV files from `/home/ultra/wyoming-debug`
+- candidates: `120`
+- `detected_by_model`: `85`
+- `missed_by_model`: `35`
+
+Manifest rows contain at least:
+
+- `path`
+- `duration`
+- `score`
+- `energy`
+- `detected_by_model`
+- `missed_by_model`
+
+Additional fields currently include `source_path`, `start_seconds`, and
+`end_seconds`, so a reviewer can map each clip back to the original debug WAV.
 
 ## 3. Важное открытие по данным
 
