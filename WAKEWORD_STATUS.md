@@ -46,6 +46,17 @@
   manifest видит `120` фрагментов и `35` missed candidates
 - activation/done WAV playback проверен через ReSpeaker:
   `aplay -D plughw:CARD=ArrayUAC10,DEV=0 /app/sounds/awake.wav`
+- positive collection больше не зависит от успешного wake trigger:
+  `scripts/wakeword_channel0_tee.py` следит за
+  `/dataset/positive_sessions/current.json` и пишет utterance WAV напрямую из
+  ReSpeaker/Wyoming stream в `/dataset/positives/real_user/<session>/`
+- HA session report теперь отдельно считает:
+  - `captured_files_since_start` - сколько обучающих WAV уже записано
+  - `wake_files_since_start` - сколько раз реально сработала активная модель
+  - `capture_recall` - доля записанных попыток
+  - `observed_trigger_recall` - доля wake-срабатываний активной модели
+- synthetic recorder smoke-test прошел: активная test-session, тишина, tone,
+  тишина -> ровно один WAV clip и JSON sidecar
 
 Критическое исправление 2026-06-12:
 
