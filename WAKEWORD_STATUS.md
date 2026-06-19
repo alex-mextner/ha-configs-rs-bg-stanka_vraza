@@ -26,6 +26,27 @@
 - Backup incompatible training-layout active file: `/home/ultra/oww-models/ey_milosh.tflite.backup.20260612-pre-pyopen-layout`
 - PyOpen-compatible iter7 artifact: `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/ey_milosh.pyopen.tflite`
 
+Критическое исправление 2026-06-19:
+
+- `wyoming-satellite` pass-through capture после завершенной weekly noise session
+  мог уходить в старый `/app/sounds/capture_ch0.sh`, где был hardcoded
+  `arecord -D plughw:2,0`
+- сейчас `plughw:2,0` соответствует `sof-hda-dsp`, а ReSpeaker USB Mic Array
+  виден как `plughw:CARD=ArrayUAC10,DEV=0`
+- это объясняет отсутствие новых `*-wake.wav`: сегодня сессия
+  `20260619T150436Z` дала `copied_wake_files=0` при `expected_attempts=30`
+- capture wrapper теперь стабильно использует `plughw:CARD=ArrayUAC10,DEV=0`
+  и не проваливается в старый capture script после завершения raw-live записи
+- `sensor.wakeword_mic_direction` читает `DOAANGLE`/`VOICEACTIVITY` из
+  ReSpeaker USB tuning endpoint `2886:0018`
+- `sensor.wakeword_mic_level` читает live status из 6-channel ReSpeaker stream,
+  который одновременно кормит Wyoming satellite
+- UI Studio больше не использует browser microphone для качества записи; в
+  snapshot проверено: направление отображается как ReSpeaker array, review
+  manifest видит `120` фрагментов и `35` missed candidates
+- activation/done WAV playback проверен через ReSpeaker:
+  `aplay -D plughw:CARD=ArrayUAC10,DEV=0 /app/sounds/awake.wav`
+
 Критическое исправление 2026-06-12:
 
 - предыдущий активный TFLite имел input shape `[1, 96, 16]`
@@ -82,6 +103,22 @@ Offline report по этому кандидату:
 
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/metrics_tflite_stt1200.json`
 - `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/run_report.json`
+
+Fresh active TFLite audit, 2026-06-19:
+
+- report: `/home/ultra/oww-models/active_eval/ey_milosh_active_20260619_tflite_stt1200.json`
+- command: `docker run --rm --user 1000:1000 ... oww-train:latest python3 /workspace/homeassistant/scripts/wakeword_iterate.py --max-stt-windows 1200 evaluate-tflite --model /workspace/models/ey_milosh.tflite --output /workspace/models/active_eval/ey_milosh_active_20260619_tflite_stt1200.json`
+- validation selected threshold: `0.99`, validation recall `0.9942`,
+  validation FP `0`
+- deployed threshold `0.991` on test sweep:
+  `TP=658`, `FN=10`, `FP=0`, `TN=1615`, recall `0.9850`,
+  measured offline FPR `0.0/h`
+- threshold `0.99` on the same test sweep has the same recall `0.9850`, but
+  introduces `FP=1`, so deployment stays at `0.991`
+- threshold `0.998` keeps `FP=0`, but recall drops to `0.9760`; this is too
+  conservative while real-user positives are not collected yet
+- test negative max score: `0.990655779838562`, which is just below the active
+  `0.991` threshold
 
 Real-data collection report:
 
