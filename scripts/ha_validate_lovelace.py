@@ -94,11 +94,14 @@ def iter_cards(cards: object, location: str):
 
 def collect_resources(config: dict) -> tuple[list[dict], set[str], set[str], list[str]]:
     errors: list[str] = []
-    resources = ((config.get("lovelace") or {}).get("resources") or [])
+    lovelace = config.get("lovelace") or {}
+    resources = lovelace.get("resources") or []
     if resources is None:
         resources = []
     if not isinstance(resources, list):
         return [], set(), set(), ["configuration.yaml: lovelace.resources must be a list"]
+    if resources and lovelace.get("resource_mode") != "yaml":
+        errors.append("configuration.yaml: lovelace.resources requires lovelace.resource_mode: yaml")
 
     resource_names: set[str] = set()
     defined_custom_elements: set[str] = set()
@@ -113,6 +116,12 @@ def collect_resources(config: dict) -> tuple[list[dict], set[str], set[str], lis
         if not isinstance(url, str) or not url:
             errors.append(f"configuration.yaml: lovelace.resources[{index}].url must be a non-empty string")
             continue
+        resource_type = item.get("type")
+        if resource_type not in {"module", "js", "css"}:
+            errors.append(
+                f"configuration.yaml: lovelace.resources[{index}].type must be one of "
+                "module, js, css"
+            )
         resource_names.add(resource_name_hint(url))
         local_path = local_resource_path(url)
         normalized.append({"url": url, "local_path": local_path})

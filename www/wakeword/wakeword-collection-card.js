@@ -241,16 +241,18 @@ class WakewordCollectionCard extends HTMLElement {
 
   setSoundEnabled(enabled) {
     localStorage.setItem("wakewordCollectionSound", enabled ? "on" : "off");
+    if (enabled) this.playSound("success");
     this.update();
   }
 
-  playSound(kind) {
+  async playSound(kind) {
     if (!this.soundEnabled()) return;
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) return;
       this.audioContext = this.audioContext || new AudioContext();
       const ctx = this.audioContext;
+      if (ctx.state === "suspended") await ctx.resume();
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
       const now = ctx.currentTime;
@@ -965,7 +967,7 @@ class WakewordCollectionCard extends HTMLElement {
   updateDirection(location) {
     const entityId = this.config?.direction_entity || "sensor.wakeword_mic_direction";
     const raw = this.value(entityId, "");
-    const numeric = Number(raw);
+    const numeric = raw === "" ? NaN : Number(raw);
     const point = ROOM_POINTS.find((item) => item.id === location);
     const needle = this.shadowRoot.getElementById("needle");
     const text = this.shadowRoot.getElementById("directionText");

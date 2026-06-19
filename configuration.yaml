@@ -129,8 +129,9 @@ homeassistant:
   packages: !include_dir_named packages
 
 lovelace:
+  resource_mode: yaml
   resources:
-    - url: /local/wakeword/wakeword-collection-card.js?v=20260618b
+    - url: /local/wakeword/wakeword-collection-card.js?v=20260619b
       type: module
     - url: /webrtc/webrtc-camera.js?v=3.6.1
       type: module
