@@ -266,7 +266,7 @@ class WakewordCollectionCard extends HTMLElement {
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const rawSamples = Array.isArray(data) ? data : (data.samples || data.candidates || data.items || []);
+      const rawSamples = Array.isArray(data) ? data : (data.samples || data.fragments || data.candidates || data.items || []);
       this.reviewSamples = rawSamples
         .map((sample, index) => this.normalizeReviewSample(sample, index))
         .filter((sample) => sample.url && !this.deletedReviewSamples().has(sample.id));

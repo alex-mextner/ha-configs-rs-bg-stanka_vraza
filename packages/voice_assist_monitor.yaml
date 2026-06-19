@@ -196,8 +196,10 @@ shell_command:
   voice_restart_satellite: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-satellite"
   voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
   voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
-  voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:2,0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
-  voice_play_last_stt: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:2,0 $(ls -1t /tmp/debug/*-stt.wav | head -n1)' 2>/dev/null || echo 'failed'"
+  voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
+  voice_play_last_stt: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 $(ls -1t /tmp/debug/*-stt.wav | head -n1)' 2>/dev/null || echo 'failed'"
+  voice_play_awake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 /app/sounds/awake.wav' 2>/dev/null || echo 'failed'"
+  voice_play_done: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 /app/sounds/done.wav' 2>/dev/null || echo 'failed'"
 
 # ── Automations: latency tracking ──
 automation:
