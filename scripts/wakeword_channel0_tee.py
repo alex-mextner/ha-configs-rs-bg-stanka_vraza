@@ -13,6 +13,7 @@ import datetime as dt
 import json
 import math
 import os
+import re
 import struct
 import sys
 import time
@@ -25,6 +26,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-record", action="store_true")
     parser.add_argument("--status-file", type=Path)
     parser.add_argument("--status-interval-seconds", type=float, default=0.5)
+    parser.add_argument("--positive-session-file", type=Path)
+    parser.add_argument("--positive-root", type=Path)
+    parser.add_argument("--positive-pre-roll-seconds", type=float, default=0.6)
+    parser.add_argument("--positive-end-silence-seconds", type=float, default=0.6)
+    parser.add_argument("--positive-min-seconds", type=float, default=0.45)
+    parser.add_argument("--positive-max-seconds", type=float, default=3.0)
+    parser.add_argument("--positive-start-margin-db", type=float, default=8.0)
+    parser.add_argument("--positive-end-margin-db", type=float, default=4.0)
+    parser.add_argument("--positive-min-start-dbfs", type=float, default=-40.0)
     parser.add_argument("--sample-rate", type=int, default=16000)
     parser.add_argument("--channels-in", type=int, default=6)
     parser.add_argument("--sample-width", type=int, default=2)
@@ -146,6 +156,251 @@ def extract_channel0(raw: bytes, channels_in: int, sample_width: int) -> bytes:
     return b"".join(frames[i : i + sample_width] for i in range(0, usable, frame_size))
 
 
+def slug(value: object) -> str:
+    text = str(value or "").strip().lower().replace(" ", "_")
+    text = re.sub(r"[^0-9a-zA-Zа-яА-ЯёЁ_.-]+", "_", text)
+    return text.strip("_") or "wake"
+
+
+def write_mono_wav(path: Path, data: bytes, sample_rate: int, sample_width: int) -> None:
+    data_size = len(data)
+    byte_rate = sample_rate * sample_width
+    block_align = sample_width
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + data_size,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        sample_rate,
+        byte_rate,
+        block_align,
+        sample_width * 8,
+        b"data",
+        data_size,
+    )
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("wb") as handle:
+        handle.write(header)
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    tmp.replace(path)
+
+
+def dbfs_mono(data: bytes, sample_width: int) -> float:
+    if not data or sample_width != 2:
+        return -120.0
+    usable = len(data) - (len(data) % sample_width)
+    if usable <= 0:
+        return -120.0
+    samples = memoryview(data[:usable]).cast("h")
+    if len(samples) == 0:
+        return -120.0
+    total = 0.0
+    for value in samples:
+        total += float(int(value) * int(value))
+    rms = math.sqrt(total / len(samples))
+    return 20.0 * math.log10(max(rms, 1.0) / 32768.0)
+
+
+class PositiveSessionRecorder:
+    def __init__(
+        self,
+        session_file: Path | None,
+        positive_root: Path | None,
+        sample_rate: int,
+        sample_width: int,
+        pre_roll_seconds: float,
+        end_silence_seconds: float,
+        min_seconds: float,
+        max_seconds: float,
+        start_margin_db: float,
+        end_margin_db: float,
+        min_start_dbfs: float,
+    ) -> None:
+        self.session_file = session_file
+        self.positive_root = positive_root
+        self.sample_rate = sample_rate
+        self.sample_width = sample_width
+        self.pre_roll_frames = max(0, int(pre_roll_seconds * sample_rate))
+        self.end_silence_frames = max(1, int(end_silence_seconds * sample_rate))
+        self.min_frames = max(1, int(min_seconds * sample_rate))
+        self.max_frames = max(self.min_frames, int(max_seconds * sample_rate))
+        self.start_margin_db = start_margin_db
+        self.end_margin_db = end_margin_db
+        self.min_start_dbfs = min_start_dbfs
+        self.active_session: dict | None = None
+        self.session_mtime: float | None = None
+        self.output_dir: Path | None = None
+        self.clip_count = 0
+        self.noise_floor_dbfs = -55.0
+        self.pre_roll: list[bytes] = []
+        self.pre_roll_frame_count = 0
+        self.current_chunks: list[bytes] = []
+        self.current_frames = 0
+        self.current_level_max = -120.0
+        self.silence_frames = 0
+        self.recording = False
+
+    def observe(self, data: bytes) -> None:
+        if self.session_file is None or self.positive_root is None:
+            return
+        frames = len(data) // self.sample_width
+        if frames <= 0:
+            return
+
+        level = dbfs_mono(data, self.sample_width)
+        self._load_session_if_needed()
+        if self.active_session is None:
+            self._update_noise_floor(level)
+            self._push_pre_roll(data, frames)
+            return
+
+        expected = int(self.active_session.get("expected_attempts") or 0)
+        if expected > 0 and self.clip_count >= expected:
+            self._update_noise_floor(level)
+            self._push_pre_roll(data, frames)
+            return
+
+        start_threshold = max(self.noise_floor_dbfs + self.start_margin_db, self.min_start_dbfs)
+        end_threshold = self.noise_floor_dbfs + self.end_margin_db
+        if not self.recording:
+            self._push_pre_roll(data, frames)
+            if level >= start_threshold:
+                self.recording = True
+                self.current_chunks = list(self.pre_roll)
+                self.current_frames = self.pre_roll_frame_count
+                self.current_level_max = level
+                self.silence_frames = 0
+            else:
+                self._update_noise_floor(level)
+                return
+
+        self.current_chunks.append(data)
+        self.current_frames += frames
+        self.current_level_max = max(self.current_level_max, level)
+        if level <= end_threshold:
+            self.silence_frames += frames
+        else:
+            self.silence_frames = 0
+
+        complete_by_silence = self.current_frames >= self.min_frames and self.silence_frames >= self.end_silence_frames
+        complete_by_length = self.current_frames >= self.max_frames
+        if complete_by_silence or complete_by_length:
+            self._finish_clip(reason="silence" if complete_by_silence else "max_length")
+
+    def _load_session_if_needed(self) -> None:
+        assert self.session_file is not None
+        try:
+            stat = self.session_file.stat()
+        except FileNotFoundError:
+            self._clear_session()
+            return
+
+        if self.session_mtime == stat.st_mtime and self.active_session is not None:
+            return
+
+        try:
+            session = json.loads(self.session_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+
+        if session.get("id") != (self.active_session or {}).get("id"):
+            self._reset_recording()
+            self.clip_count = 0
+
+        self.active_session = session
+        self.session_mtime = stat.st_mtime
+        self.output_dir = self._output_dir(session)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.clip_count = max(self.clip_count, len(list(self.output_dir.glob("*.wav"))))
+
+    def _clear_session(self) -> None:
+        if self.active_session is not None:
+            self._reset_recording()
+        self.active_session = None
+        self.session_mtime = None
+        self.output_dir = None
+        self.clip_count = 0
+
+    def _output_dir(self, session: dict) -> Path:
+        if session.get("output_name"):
+            assert self.positive_root is not None
+            return self.positive_root / slug(session["output_name"])
+        if session.get("output_dir"):
+            output_dir = Path(str(session["output_dir"]))
+            parts = output_dir.parts
+            if "real_user" in parts:
+                assert self.positive_root is not None
+                index = parts.index("real_user")
+                if index + 1 < len(parts):
+                    return self.positive_root / Path(*parts[index + 1 :])
+            return output_dir
+        assert self.positive_root is not None
+        parts = [slug(session.get(key)) for key in ("phrase", "speaker", "style", "location") if session.get(key)]
+        return self.positive_root / f"{session.get('id', 'session')}_{'_'.join(parts)}"
+
+    def _push_pre_roll(self, data: bytes, frames: int) -> None:
+        self.pre_roll.append(data)
+        self.pre_roll_frame_count += frames
+        while self.pre_roll and self.pre_roll_frame_count > self.pre_roll_frames:
+            removed = self.pre_roll.pop(0)
+            self.pre_roll_frame_count -= len(removed) // self.sample_width
+
+    def _update_noise_floor(self, level: float) -> None:
+        if level > self.noise_floor_dbfs + 12.0:
+            return
+        self.noise_floor_dbfs = (self.noise_floor_dbfs * 0.98) + (level * 0.02)
+
+    def _reset_recording(self) -> None:
+        self.recording = False
+        self.current_chunks = []
+        self.current_frames = 0
+        self.current_level_max = -120.0
+        self.silence_frames = 0
+
+    def _finish_clip(self, reason: str) -> None:
+        if self.active_session is None or self.output_dir is None:
+            self._reset_recording()
+            return
+        data = b"".join(self.current_chunks)
+        frames = len(data) // self.sample_width
+        if frames < self.min_frames:
+            self._reset_recording()
+            return
+
+        self.clip_count += 1
+        session_id = slug(self.active_session.get("id", "session"))
+        phrase = slug(self.active_session.get("phrase", "wake"))
+        speaker = slug(self.active_session.get("speaker", "speaker"))
+        style = slug(self.active_session.get("style", "style"))
+        location = slug(self.active_session.get("location", "location"))
+        path = self.output_dir / f"{session_id}_{self.clip_count:03d}_{phrase}_{speaker}_{style}_{location}.wav"
+        write_mono_wav(path, data, self.sample_rate, self.sample_width)
+        meta = {
+            "session_id": self.active_session.get("id"),
+            "phrase": self.active_session.get("phrase"),
+            "speaker": self.active_session.get("speaker"),
+            "style": self.active_session.get("style"),
+            "location": self.active_session.get("location"),
+            "index": self.clip_count,
+            "path": str(path),
+            "duration_seconds": round(frames / self.sample_rate, 3),
+            "level_max_dbfs": round(self.current_level_max, 1),
+            "noise_floor_dbfs": round(self.noise_floor_dbfs, 1),
+            "finish_reason": reason,
+            "created_at": dt.datetime.now(dt.UTC).isoformat(),
+            "source": "respeaker_stream_vad",
+        }
+        path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"[wakeword-positive] captured {path}", file=sys.stderr, flush=True)
+        self._reset_recording()
+
+
 class ArrayStatusWriter:
     def __init__(
         self,
@@ -257,6 +512,19 @@ def main() -> int:
         args.sample_width,
         args.status_interval_seconds,
     )
+    positive_recorder = PositiveSessionRecorder(
+        args.positive_session_file,
+        args.positive_root,
+        args.sample_rate,
+        args.sample_width,
+        args.positive_pre_roll_seconds,
+        args.positive_end_silence_seconds,
+        args.positive_min_seconds,
+        args.positive_max_seconds,
+        args.positive_start_margin_db,
+        args.positive_end_margin_db,
+        args.positive_min_start_dbfs,
+    )
     stdout = sys.stdout.buffer
     pending = b""
 
@@ -273,6 +541,7 @@ def main() -> int:
             ch0 = extract_channel0(usable_raw, args.channels_in, args.sample_width)
             if not ch0:
                 continue
+            positive_recorder.observe(ch0)
             stdout.write(ch0)
             stdout.flush()
             writer.write(ch0)

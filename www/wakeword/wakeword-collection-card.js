@@ -983,7 +983,7 @@ class WakewordCollectionCard extends HTMLElement {
 
               <div class="progressbar"><div id="progressFill"></div></div>
               <div class="metrics">
-                <div class="metric"><strong id="metricObserved">0</strong><span>сработало в блоке</span></div>
+                <div class="metric"><strong id="metricObserved">0</strong><span>записано в блоке</span></div>
                 <div class="metric"><strong id="metricRemaining">0</strong><span>осталось попыток</span></div>
                 <div class="metric"><strong id="metricSaved">0</strong><span>сохранено WAV</span></div>
                 <div class="metric"><strong>0 / 222ч</strong><span>ложных на фоне</span></div>
@@ -1036,7 +1036,7 @@ class WakewordCollectionCard extends HTMLElement {
               </div>
               <div class="metrics" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 0">
                 <div class="metric"><strong id="metricSessions">0</strong><span>завершено сессий</span></div>
-                <div class="metric"><strong id="metricRecall">0%</strong><span>попаданий в блоке</span></div>
+                <div class="metric"><strong id="metricRecall">0%</strong><span>записи блока</span></div>
                 <div class="metric"><strong id="metricNext">1/12</strong><span>следующий шаг</span></div>
               </div>
             </div>
@@ -1204,7 +1204,7 @@ class WakewordCollectionCard extends HTMLElement {
   update() {
     if (!this.shadowRoot || !this._hass) return;
     const active = this.value("sensor.wakeword_positive_session") === "active";
-    const observed = Number(this.attr("sensor.wakeword_positive_session", "wake_files_since_start", 0));
+    const observed = Number(this.attr("sensor.wakeword_positive_session", "captured_files_since_start", this.attr("sensor.wakeword_positive_session", "wake_files_since_start", 0)));
     const expected = Number(this.attr("sensor.wakeword_positive_session", "expected_attempts", this.value("input_number.wakeword_collection_expected_attempts", 30))) || 30;
     const progress = expected > 0 ? Math.min(1, observed / expected) : 0;
     const planIndex = this.currentPlanIndex();

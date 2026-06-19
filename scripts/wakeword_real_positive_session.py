@@ -43,6 +43,26 @@ def read_current(dataset_root: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def session_output_dir(dataset_root: Path, session: dict) -> Path:
+    if session.get("output_dir"):
+        return Path(str(session["output_dir"]))
+    if session.get("output_name"):
+        return dataset_root / "positives" / "real_user" / slug(session["output_name"])
+    session_slug = "_".join(
+        slug(str(session.get(key) or ""))
+        for key in ("phrase", "speaker", "style", "location")
+        if session.get(key)
+    )
+    return dataset_root / "positives" / "real_user" / f"{session['id']}_{session_slug}"
+
+
+def captured_files_for_session(dataset_root: Path, session: dict) -> list[Path]:
+    out_dir = session_output_dir(dataset_root, session)
+    if not out_dir.exists():
+        return []
+    return sorted(path for path in out_dir.glob("*.wav") if path.stat().st_size > 44)
+
+
 def command_start(args: argparse.Namespace) -> int:
     sessions = session_dir(args.dataset_root)
     sessions.mkdir(parents=True, exist_ok=True)
@@ -55,7 +75,11 @@ def command_start(args: argparse.Namespace) -> int:
         "style": args.style,
         "location": args.location,
         "expected_attempts": args.expected_attempts,
+        "capture_mode": "respeaker_stream_vad",
     }
+    session["output_name"] = slug(session_output_dir(Path(""), session).name)
+    session["output_dir"] = str(session_output_dir(args.dataset_root, session))
+    Path(session["output_dir"]).mkdir(parents=True, exist_ok=True)
     current_session_path(args.dataset_root).write_text(
         json.dumps(session, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -76,31 +100,41 @@ def wake_files_since(debug_root: Path, started_at: dt.datetime) -> list[Path]:
 def command_finish(args: argparse.Namespace) -> int:
     session = read_current(args.dataset_root)
     started_at = parse_time(session["started_at"])
-    files = wake_files_since(args.debug_root, started_at)
-    session_slug = "_".join(
-        slug(str(session.get(key) or ""))
-        for key in ("phrase", "speaker", "style", "location")
-        if session.get(key)
-    )
-    out_dir = args.dataset_root / "positives" / "real_user" / f"{session['id']}_{session_slug}"
+    wake_files = wake_files_since(args.debug_root, started_at)
+    out_dir = session_output_dir(args.dataset_root, session)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    captured = [
+        {"output": str(path), "bytes": path.stat().st_size}
+        for path in captured_files_for_session(args.dataset_root, session)
+    ]
     copied = []
-    for index, src in enumerate(files, start=1):
-        dst = out_dir / f"{session['id']}_{index:03d}_{src.name}"
-        shutil.copy2(src, dst)
-        copied.append({"source": str(src), "output": str(dst), "bytes": dst.stat().st_size})
+    if not captured:
+        for index, src in enumerate(wake_files, start=1):
+            dst = out_dir / f"{session['id']}_{index:03d}_{src.name}"
+            shutil.copy2(src, dst)
+            copied.append({"source": str(src), "output": str(dst), "bytes": dst.stat().st_size})
+        captured = [
+            {"output": str(path), "bytes": path.stat().st_size}
+            for path in captured_files_for_session(args.dataset_root, session)
+        ]
 
     expected_attempts = args.expected_attempts or session.get("expected_attempts")
+    recorded = len(captured)
     summary = {
         **session,
         "finished_at": now_utc().isoformat(),
         "debug_root": str(args.debug_root),
         "output_dir": str(out_dir),
+        "captured_positive_files": len(captured),
         "copied_wake_files": len(copied),
+        "wake_files_since_start": len(wake_files),
+        "recorded_positive_files": recorded,
         "expected_attempts": expected_attempts,
-        "observed_trigger_recall": (len(copied) / expected_attempts) if expected_attempts else None,
-        "files": copied,
+        "capture_recall": (recorded / expected_attempts) if expected_attempts else None,
+        "observed_trigger_recall": (len(wake_files) / expected_attempts) if expected_attempts else None,
+        "files": captured,
+        "fallback_wake_copies": copied,
     }
     summary_path = session_dir(args.dataset_root) / f"{session['id']}.summary.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -116,11 +150,14 @@ def command_report(args: argparse.Namespace) -> int:
     try:
         session = read_current(args.dataset_root)
         started_at = parse_time(session["started_at"])
-        files = wake_files_since(args.debug_root, started_at)
+        wake_files = wake_files_since(args.debug_root, started_at)
+        captured = captured_files_for_session(args.dataset_root, session)
         report = {
             **session,
             "active": True,
-            "wake_files_since_start": len(files),
+            "wake_files_since_start": len(wake_files),
+            "captured_files_since_start": len(captured),
+            "capture_output_dir": str(session_output_dir(args.dataset_root, session)),
             "debug_root": str(args.debug_root),
             "real_positive_files_total": len(positive_files),
             "session_summaries_total": len(summaries),
