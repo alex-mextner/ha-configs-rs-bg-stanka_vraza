@@ -134,6 +134,46 @@ command_line:
         - real_positive_files_total
         - session_summaries_total
         - latest_summary
+  - sensor:
+      name: "Wakeword Mic Direction"
+      unique_id: wakeword_mic_direction
+      command: "python3 /config/scripts/wakeword_array_status.py --status-file /config/oww-dataset/wakeword_array_status.json json"
+      scan_interval: 1
+      unit_of_measurement: "°"
+      value_template: >-
+        {% if value_json.state == 'ok' and value_json.direction_degrees is not none %}
+          {{ value_json.direction_degrees }}
+        {% else %}
+          unknown
+        {% endif %}
+      json_attributes:
+        - state
+        - updated_at
+        - age_seconds
+        - level_dbfs
+        - confidence
+        - source
+        - channel_rms
+        - channel_peaks
+  - sensor:
+      name: "Wakeword Mic Level"
+      unique_id: wakeword_mic_level
+      command: "python3 /config/scripts/wakeword_array_status.py --status-file /config/oww-dataset/wakeword_array_status.json json"
+      scan_interval: 1
+      unit_of_measurement: "dBFS"
+      value_template: >-
+        {% if value_json.state == 'ok' and value_json.level_dbfs is not none %}
+          {{ value_json.level_dbfs }}
+        {% else %}
+          unknown
+        {% endif %}
+      json_attributes:
+        - state
+        - updated_at
+        - age_seconds
+        - direction_degrees
+        - confidence
+        - source
 
 template:
   - sensor:

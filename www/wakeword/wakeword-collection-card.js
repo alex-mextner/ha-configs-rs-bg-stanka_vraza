@@ -181,6 +181,14 @@ class WakewordCollectionCard extends HTMLElement {
     this.pauseReviewPlaylist();
   }
 
+  directionEntityId() {
+    return this.config?.direction_entity || "sensor.wakeword_mic_direction";
+  }
+
+  levelEntityId() {
+    return this.config?.level_entity || "sensor.wakeword_mic_level";
+  }
+
   state(entityId) {
     return this._hass?.states?.[entityId];
   }
@@ -429,54 +437,6 @@ class WakewordCollectionCard extends HTMLElement {
     } catch (_err) {
       // Browser audio is best-effort only.
     }
-  }
-
-  async toggleMicMonitor() {
-    if (this.micStream) {
-      this.stopMicMonitor();
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      this.micAudioContext = new AudioContext();
-      const source = this.micAudioContext.createMediaStreamSource(stream);
-      const analyser = this.micAudioContext.createAnalyser();
-      analyser.fftSize = 1024;
-      source.connect(analyser);
-      this.micStream = stream;
-      this.micAnalyser = analyser;
-      this.micBuffer = new Float32Array(analyser.fftSize);
-      this.monitorMic();
-    } catch (error) {
-      this.micError = error?.message || String(error);
-      this.playSound("warn");
-      this.update();
-    }
-  }
-
-  stopMicMonitor() {
-    if (this.micFrame) cancelAnimationFrame(this.micFrame);
-    this.micStream?.getTracks().forEach((track) => track.stop());
-    this.micAudioContext?.close();
-    this.micStream = undefined;
-    this.micAnalyser = undefined;
-    this.micAudioContext = undefined;
-    this.micLevel = 0;
-    this.micDb = -90;
-    this.update();
-  }
-
-  monitorMic() {
-    if (!this.micAnalyser) return;
-    this.micAnalyser.getFloatTimeDomainData(this.micBuffer);
-    let sum = 0;
-    for (const sample of this.micBuffer) sum += sample * sample;
-    const rms = Math.sqrt(sum / this.micBuffer.length);
-    this.micLevel = Math.min(1, rms * 8);
-    this.micDb = rms > 0 ? Math.max(-90, 20 * Math.log10(rms)) : -90;
-    this.updateMicOnly();
-    this.micFrame = requestAnimationFrame(() => this.monitorMic());
   }
 
   render() {
@@ -1043,7 +1003,6 @@ class WakewordCollectionCard extends HTMLElement {
                 <button class="stop" id="finishBtn"><ha-icon icon="mdi:stop-circle-outline"></ha-icon>Завершить</button>
                 <button id="refreshBtn"><ha-icon icon="mdi:refresh"></ha-icon>Обновить</button>
                 <button id="soundBtn"><ha-icon icon="mdi:volume-high"></ha-icon>Звук</button>
-                <button id="micBtn"><ha-icon icon="mdi:microphone"></ha-icon>Монитор</button>
               </div>
             </div>
 
@@ -1073,7 +1032,7 @@ class WakewordCollectionCard extends HTMLElement {
               <div class="mic">
                 <div class="meter"><div id="micFill"></div></div>
                 <div class="direction-text" id="micText"></div>
-                <div class="fineprint">Этот индикатор использует микрофон браузера только для подсказки во время записи. Файлы для обучения берутся из ReSpeaker через Wyoming debug.</div>
+                <div class="fineprint">Уровень и направление берутся из 6-канального потока ReSpeaker, который одновременно кормит Wyoming satellite.</div>
               </div>
               <div class="metrics" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 0">
                 <div class="metric"><strong id="metricSessions">0</strong><span>завершено сессий</span></div>
@@ -1131,7 +1090,6 @@ class WakewordCollectionCard extends HTMLElement {
     $("finishBtn").addEventListener("click", () => this.finishSession());
     $("refreshBtn").addEventListener("click", () => this.refreshSession());
     $("soundBtn").addEventListener("click", () => this.setSoundEnabled(!this.soundEnabled()));
-    $("micBtn").addEventListener("click", () => this.toggleMicMonitor());
     $("prevStep").addEventListener("click", () => this.selectPlanStep(this.currentPlanIndex() - 1));
     $("nextStep").addEventListener("click", () => this.selectPlanStep(this.currentPlanIndex() + 1));
     $("applyStep").addEventListener("click", () => this.applyStep(WAKEWORD_PLAN[this.currentPlanIndex()]));
@@ -1293,8 +1251,6 @@ class WakewordCollectionCard extends HTMLElement {
     this.shadowRoot.getElementById("finishBtn").disabled = !active;
     this.shadowRoot.getElementById("soundBtn").innerHTML =
       `<ha-icon icon="${this.soundEnabled() ? "mdi:volume-high" : "mdi:volume-off"}"></ha-icon>${this.soundEnabled() ? "Звук вкл" : "Звук выкл"}`;
-    this.shadowRoot.getElementById("micBtn").innerHTML =
-      `<ha-icon icon="${this.micStream ? "mdi:microphone" : "mdi:microphone-outline"}"></ha-icon>${this.micStream ? "Остановить" : "Монитор"}`;
 
     this.shadowRoot.querySelectorAll(".step").forEach((node) => {
       const index = Number(node.dataset.step);
@@ -1310,37 +1266,46 @@ class WakewordCollectionCard extends HTMLElement {
   }
 
   updateDirection(location) {
-    const entityId = this.config?.direction_entity || "sensor.wakeword_mic_direction";
+    const entityId = this.directionEntityId();
     const raw = this.value(entityId, "");
     const numeric = raw === "" ? NaN : Number(raw);
+    const confidence = Number(this.attr(entityId, "confidence", NaN));
+    const age = Number(this.attr(entityId, "age_seconds", NaN));
     const point = ROOM_POINTS.find((item) => item.id === location);
     const needle = this.shadowRoot.getElementById("needle");
     const text = this.shadowRoot.getElementById("directionText");
     if (Number.isFinite(numeric)) {
       needle.style.transform = `translate(-50%, -100%) rotate(${numeric}deg)`;
-      text.textContent = `Направление от микрофонного массива: ${Math.round(numeric)} градусов. Выбранная позиция: ${LABELS.location[location] || location}.`;
+      const confidenceText = Number.isFinite(confidence) ? `, уверенность ${Math.round(confidence * 100)}%` : "";
+      const ageText = Number.isFinite(age) ? `, обновлено ${Math.round(age)} c назад` : "";
+      text.textContent = `Направление от ReSpeaker массива: ${Math.round(numeric)} градусов${confidenceText}${ageText}. Выбранная позиция: ${LABELS.location[location] || location}.`;
     } else {
       const angle = point ? Math.atan2(point.y - 50, point.x - 50) * 180 / Math.PI + 90 : 0;
       needle.style.transform = `translate(-50%, -100%) rotate(${angle}deg)`;
-      text.textContent = `Live direction sensor пока не подключен. Стрелка показывает выбранную позицию записи: ${LABELS.location[location] || location}.`;
+      text.textContent = `ReSpeaker direction sensor ждет данные. Стрелка показывает выбранную позицию записи: ${LABELS.location[location] || location}.`;
     }
   }
 
   updateMicOnly() {
     if (!this.shadowRoot) return;
-    const level = Math.max(0, Math.min(1, this.micLevel || 0));
-    const db = Number.isFinite(this.micDb) ? this.micDb : -90;
+    const levelEntity = this.levelEntityId();
+    const directionEntity = this.directionEntityId();
+    const rawDb = this.value(levelEntity, "");
+    const db = rawDb === "" ? NaN : Number(rawDb);
+    const confidence = Number(this.attr(directionEntity, "confidence", NaN));
+    const age = Number(this.attr(directionEntity, "age_seconds", NaN));
+    const level = Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 70) / 55)) : 0;
     const micFill = this.shadowRoot.getElementById("micFill");
     const micText = this.shadowRoot.getElementById("micText");
     if (!micFill || !micText) return;
     micFill.style.width = `${Math.round(level * 100)}%`;
-    if (this.micStream) {
+    if (Number.isFinite(db)) {
       const hint = db > -18 ? "громко" : db > -34 ? "хороший уровень" : db > -52 ? "тихо" : "почти тишина";
-      micText.textContent = `Браузерный микрофон: ${Math.round(db)} dBFS, ${hint}.`;
-    } else if (this.micError) {
-      micText.textContent = `Браузерный микрофон недоступен: ${this.micError}`;
+      const confidenceText = Number.isFinite(confidence) ? ` Direction confidence ${Math.round(confidence * 100)}%.` : "";
+      const ageText = Number.isFinite(age) ? ` Обновлено ${Math.round(age)} c назад.` : "";
+      micText.textContent = `ReSpeaker массив: ${Math.round(db)} dBFS, ${hint}.${confidenceText}${ageText}`;
     } else {
-      micText.textContent = "Монитор выключен. Запись для обучения все равно идет через ReSpeaker/Wyoming debug.";
+      micText.textContent = "ReSpeaker monitor ждет live данные от Wyoming capture pipeline.";
     }
   }
 
