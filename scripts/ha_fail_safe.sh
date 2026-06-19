@@ -93,18 +93,51 @@ check_ha() {
 
 check_dataplicity() {
     local api_url="${DATAPLICITY_URL%/}/api/"
-    local headers response template
+    local root_url="${DATAPLICITY_URL%/}/"
+    local headers body response template subdomain
+    local root_headers root_body
+
+    root_headers=$(mktemp "$LOG_DIR/dataplicity_root_headers.XXXXXX")
+    root_body=$(mktemp "$LOG_DIR/dataplicity_root_body.XXXXXX")
+    curl -sS --connect-timeout 10 -m 20 -D "$root_headers" -o "$root_body" "$root_url" >/dev/null 2>&1 || true
+
+    if grep -Eqi "Unknown domain|isn'?t registered|isn&#x27;t registered|not registered" "$root_body"; then
+        subdomain=$(awk -F': ' 'tolower($1) == "wormhole-subdomain" { print $2; exit }' "$root_headers" | tr -d '\r')
+        rm -f "$root_headers" "$root_body"
+        log "✗ Dataplicity URL is not registered by Wormhole (${subdomain:-unknown subdomain}) for $root_url; update the Dataplicity/Wormhole URL. Restarting HA will not fix this."
+        return 2
+    fi
+
+    if grep -qi '^wormhole-template:' "$root_headers"; then
+        template=$(awk -F': ' 'tolower($1) == "wormhole-template" { print $2; exit }' "$root_headers" | tr -d '\r')
+        rm -f "$root_headers" "$root_body"
+        log "✗ Dataplicity tunnel returned wormhole template ${template:-unknown} for $root_url"
+        return 1
+    fi
+
+    rm -f "$root_headers" "$root_body"
+
     headers=$(mktemp "$LOG_DIR/dataplicity_headers.XXXXXX")
-    response=$(curl -sS -L --connect-timeout 10 -m 20 -D "$headers" -o /dev/null -w '%{http_code}' "$api_url" 2>/dev/null || true)
+    body=$(mktemp "$LOG_DIR/dataplicity_body.XXXXXX")
+    response=$(curl -sS -L --connect-timeout 10 -m 20 -D "$headers" -o "$body" -w '%{http_code}' "$api_url" 2>/dev/null || true)
+
+    if grep -Eqi "Unknown domain|isn'?t registered|isn&#x27;t registered|not registered" "$body"; then
+        subdomain=$(awk -F': ' 'tolower($1) == "wormhole-subdomain" { print $2; exit }' "$headers" | tr -d '\r')
+        rm -f "$headers" "$body"
+        log "✗ Dataplicity URL is not registered by Wormhole (${subdomain:-unknown subdomain}) for $api_url; update the Dataplicity/Wormhole URL. Restarting HA will not fix this."
+        return 2
+    fi
 
     if grep -qi '^wormhole-template:' "$headers"; then
         template=$(awk -F': ' 'tolower($1) == "wormhole-template" { print $2; exit }' "$headers" | tr -d '\r')
-        rm -f "$headers"
+        subdomain=$(awk -F': ' 'tolower($1) == "wormhole-subdomain" { print $2; exit }' "$headers" | tr -d '\r')
+
+        rm -f "$headers" "$body"
         log "✗ Dataplicity tunnel returned wormhole template ${template:-unknown} for $api_url"
         return 1
     fi
 
-    rm -f "$headers"
+    rm -f "$headers" "$body"
 
     case "$response" in
         200|401)
@@ -123,6 +156,20 @@ check_dataplicity() {
 }
 
 fix_dataplicity() {
+    local dataplicity_status
+
+    if check_dataplicity; then
+        log "Dataplicity tunnel is already online"
+        return 0
+    else
+        dataplicity_status=$?
+    fi
+
+    if [ "$dataplicity_status" -eq 2 ]; then
+        log "Skipping HA restart because Dataplicity reports an unregistered Wormhole domain"
+        return 2
+    fi
+
     # Anti-flap: skip if HA was restarted < 10 min ago
     local uptime_sec=$(docker inspect --format='{{.State.StartedAt}}' homeassistant-homeassistant-1 2>/dev/null | xargs -I{} python3 -c "import datetime,sys; d=datetime.datetime.fromisoformat('{}'.replace('Z','+00:00')); print(int((datetime.datetime.now(datetime.timezone.utc)-d).total_seconds()))")
     if [ -n "$uptime_sec" ] && [ "$uptime_sec" -lt 600 ]; then
