@@ -155,6 +155,8 @@ class WakewordCollectionCard extends HTMLElement {
     this.config = config || {};
     this.reviewManifestUrl = this.config.review_manifest_url || "/local/wakeword/wakeword-sample-candidates.json";
     this.reviewStatusUrl = this.config.review_status_url || "/local/wakeword/review-status.json";
+    this.reviewPageSize = Number(this.config.review_page_size || 40);
+    this.reviewRenderLimit = this.reviewPageSize;
   }
 
   set hass(hass) {
@@ -403,7 +405,14 @@ class WakewordCollectionCard extends HTMLElement {
   }
 
   reviewVisibleSamples() {
-    return this.reviewSamples || [];
+    const limit = Math.max(1, Number(this.reviewRenderLimit || this.reviewPageSize || 40));
+    return (this.reviewSamples || []).slice(0, limit);
+  }
+
+  showMoreReviewSamples() {
+    const pageSize = Math.max(1, Number(this.reviewPageSize || 40));
+    this.reviewRenderLimit = Math.min((this.reviewSamples || []).length, Number(this.reviewRenderLimit || pageSize) + pageSize);
+    this.renderReview();
   }
 
   async toggleReviewPlaylist() {
@@ -1192,6 +1201,7 @@ class WakewordCollectionCard extends HTMLElement {
               <div class="review-actions">
                 <button id="reviewPlaylistBtn"><ha-icon icon="mdi:play"></ha-icon>Play</button>
                 <button id="reviewRefreshBtn"><ha-icon icon="mdi:refresh"></ha-icon>Refresh</button>
+                <button id="reviewMoreBtn"><ha-icon icon="mdi:chevron-down"></ha-icon>Еще</button>
               </div>
             </div>
             <div id="reviewBody"></div>
@@ -1236,6 +1246,7 @@ class WakewordCollectionCard extends HTMLElement {
     $("applyStep").addEventListener("click", () => this.applyStep(WAKEWORD_PLAN[this.currentPlanIndex()]));
     $("reviewPlaylistBtn").addEventListener("click", () => this.toggleReviewPlaylist());
     $("reviewRefreshBtn").addEventListener("click", () => this.loadReviewManifest(true));
+    $("reviewMoreBtn").addEventListener("click", () => this.showMoreReviewSamples());
   }
 
   currentPlanIndex() {
@@ -1274,16 +1285,19 @@ class WakewordCollectionCard extends HTMLElement {
     const body = this.shadowRoot.getElementById("reviewBody");
     const subtitle = this.shadowRoot.getElementById("reviewSubtitle");
     const playlistBtn = this.shadowRoot.getElementById("reviewPlaylistBtn");
-    if (!body || !subtitle || !playlistBtn) return;
+    const moreBtn = this.shadowRoot.getElementById("reviewMoreBtn");
+    if (!body || !subtitle || !playlistBtn || !moreBtn) return;
 
+    const allSamples = this.reviewSamples || [];
     const samples = this.reviewVisibleSamples();
-    const missedCount = samples.filter((sample) => sample.missedByModel).length;
-    const confirmedCount = samples.filter((sample) => sample.confirmedForTraining).length;
-    const negativeCount = samples.filter((sample) => sample.negativeAdded).length;
+    const missedCount = allSamples.filter((sample) => sample.missedByModel).length;
+    const confirmedCount = allSamples.filter((sample) => sample.confirmedForTraining).length;
+    const negativeCount = allSamples.filter((sample) => sample.negativeAdded).length;
     subtitle.textContent = this.reviewLoading
       ? "Загружаю manifest кандидатов..."
-      : `${samples.length} фрагментов, новые сверху. ${missedCount} не распознаны моделью, ${confirmedCount} подтверждены, ${negativeCount} добавлены в шумовые negatives.`;
+      : `Показано ${samples.length}/${allSamples.length}, новые сверху. ${missedCount} не распознаны моделью, ${confirmedCount} подтверждены, ${negativeCount} добавлены в шумовые negatives.`;
     playlistBtn.disabled = !samples.length;
+    moreBtn.disabled = samples.length >= allSamples.length;
     playlistBtn.innerHTML =
       `<ha-icon icon="${this.reviewPlaying ? "mdi:pause" : "mdi:play"}"></ha-icon>${this.reviewPlaying ? "Pause" : "Play"}`;
 
