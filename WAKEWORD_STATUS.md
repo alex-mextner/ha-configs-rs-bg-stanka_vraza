@@ -1,6 +1,6 @@
 # Статус: кастомная wake word модель `ey_milosh`
 
-Дата обновления: 2026-06-19
+Дата обновления: 2026-06-20
 
 ## 1. Текущий статус
 
@@ -25,6 +25,63 @@
 - Backup previous active V2: `/home/ultra/oww-models/ey_milosh.tflite.backup.20260602-190941`
 - Backup incompatible training-layout active file: `/home/ultra/oww-models/ey_milosh.tflite.backup.20260612-pre-pyopen-layout`
 - PyOpen-compatible iter7 artifact: `/home/ultra/oww-models/ey_milosh_v2_iter7_dnn_hnm_strict_nw12_h256/dnn/ey_milosh.pyopen.tflite`
+
+Критическое исправление 2026-06-20:
+
+- root cause для "то ли не слышит, то ли не показывает" найден: HA
+  `shell_command` создавал каталог positive session как `root:root`, а
+  `wyoming-satellite` работает как `1000:1000` и не мог писать WAV в
+  `/dataset/positives/real_user/<session>/`
+- уже накопившиеся root-owned каталоги `positive_sessions` и
+  `positives/real_user` переведены в `ultra:ultra` без `sudo`, через
+  одноразовый `docker run --rm -v /home/ultra/oww-dataset:/dataset alpine ...`
+- `scripts/wakeword_real_positive_session.py` теперь при старте сессии
+  выставляет `capture_uid/capture_gid` и режимы доступа для session JSON,
+  summary JSON и output dir, чтобы satellite мог писать напрямую
+- `scripts/wakeword_channel0_tee.py` больше не сохраняет training clip, если
+  речь не закончилась до `3.0s`; такой фрагмент отбрасывается как
+  `continued_past_max`
+- минимальная длительность training clip и mined candidate поднята до `1.0s`,
+  максимальная - `3.0s`
+- `scripts/wakeword_smoke_manifest.py mine-fragments` теперь:
+  - добавляет стабильный `id`, `sample_time`, `sample_time_epoch`
+  - сортирует candidates от новых к старым
+  - помечает `training_mode` по active/summary sessions и `positives/real_user`
+  - включает консервативный music-filter
+  - пишет review flags `pending/confirmed/negative`
+- текущий review manifest пересобран:
+  - candidates: `200`
+  - duration range: `1.0..2.97s`
+  - sort: newest-first
+  - music_filter: `enabled`
+- удаление в review UI заменено на добавление в noise negatives:
+  `scripts/wakeword_review_candidate.py negative` копирует WAV в
+  `/home/ultra/oww-dataset/negatives/review_rejected/`
+- зеленая галочка `confirm` копирует WAV в
+  `/home/ultra/oww-dataset/positives/review_confirmed/`; только эти
+  подтвержденные review samples должны использоваться как real positives в
+  следующем обучении
+- review state хранится в обычном
+  `/home/ultra/homeassistant/www/wakeword/review-status.json`, не в `.storage`
+- Studio UI показывает дату/время sample, training-mode badge,
+  confirmed/negative badges, последовательный playlist с паузой `500ms`,
+  кнопки `Play`, `Подтвердить`, `Добавить в шумовые negative samples`
+- кнопка "Завершить" теперь только останавливает session; она больше не
+  двигает план и не помечает блок выполненным
+- UI проигрывает короткий browser-click и мигает счетчиком, когда
+  `captured_files_since_start` реально увеличился
+- live direction отображается из ReSpeaker: основной угол из
+  `sensor.wakeword_mic_direction`, confidence/age fallback из
+  `sensor.wakeword_mic_level`
+- проверено:
+  - `ha_validate_yaml.sh packages/wakeword_voice_collection.yaml configuration.yaml`
+  - `ha_validate_lovelace.sh`
+  - `node --check www/wakeword/wakeword-collection-card.js`
+  - `python3 -m py_compile` для wakeword scripts
+  - HA API: новые `shell_command.wakeword_review_candidate_confirm` и
+    `shell_command.wakeword_review_candidate_negative` загружены
+  - `agent-browser` Studio snapshot: custom-card открыт, direction live,
+    review list показывает `200` candidates и новые action buttons
 
 Критическое исправление 2026-06-19:
 
