@@ -154,6 +154,7 @@ class WakewordCollectionCard extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
     this.reviewManifestUrl = this.config.review_manifest_url || "/local/wakeword/wakeword-sample-candidates.json";
+    this.reviewStatusUrl = this.config.review_status_url || "/local/wakeword/review-status.json";
   }
 
   set hass(hass) {
@@ -174,10 +175,14 @@ class WakewordCollectionCard extends HTMLElement {
       this.attachShadow({ mode: "open" });
       this.render();
     }
+    clearInterval(this.liveTimer);
+    this.liveTimer = setInterval(() => this.update(), 1000);
     this.loadReviewManifest();
   }
 
   disconnectedCallback() {
+    clearInterval(this.liveTimer);
+    clearTimeout(this.metricPulseTimer);
     this.pauseReviewPlaylist();
   }
 
@@ -243,6 +248,8 @@ class WakewordCollectionCard extends HTMLElement {
   async finishSession() {
     this.playSound("success");
     await this.call("script", "turn_on", { entity_id: "script.wakeword_collection_finish" });
+    this.captureCounterState = null;
+    setTimeout(() => this.refreshSession(), 1200);
   }
 
   async refreshSession() {
@@ -267,9 +274,11 @@ class WakewordCollectionCard extends HTMLElement {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       const rawSamples = Array.isArray(data) ? data : (data.samples || data.fragments || data.candidates || data.items || []);
+      const statuses = await this.loadReviewStatuses(true);
       this.reviewSamples = rawSamples
-        .map((sample, index) => this.normalizeReviewSample(sample, index))
-        .filter((sample) => sample.url && !this.deletedReviewSamples().has(sample.id));
+        .map((sample, index) => this.normalizeReviewSample(sample, index, statuses))
+        .filter((sample) => sample.url)
+        .sort((left, right) => (right.sampleTimeEpoch || 0) - (left.sampleTimeEpoch || 0));
       this.reviewLoaded = true;
     } catch (error) {
       this.reviewSamples = [];
@@ -281,25 +290,89 @@ class WakewordCollectionCard extends HTMLElement {
     }
   }
 
-  normalizeReviewSample(sample, index) {
+  async loadReviewStatuses(force = false) {
+    if (this.reviewStatuses && !force) return this.reviewStatuses;
+    try {
+      const url = this.getReviewStatusUrl();
+      const separator = url.includes("?") ? "&" : "?";
+      const response = await fetch(`${url}${separator}t=${Date.now()}`, { cache: "no-store" });
+      if (response.status === 404) {
+        this.reviewStatuses = {};
+        return this.reviewStatuses;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      this.reviewStatuses = data.items || data || {};
+    } catch (_error) {
+      this.reviewStatuses = {};
+    }
+    return this.reviewStatuses;
+  }
+
+  normalizeReviewSample(sample, index, statuses = {}) {
     const rawUrl = sample.url || sample.path || "";
     const label = sample.label || sample.phrase || sample.text || "candidate";
     const detected = sample.detected_by_model;
     const missed = sample.missed_by_model === true || (detected === false && this.isShortPhrase(label));
+    const id = this.reviewSampleId(sample, index);
+    const status = statuses[id] || statuses[String(sample.path || "")] || statuses[String(sample.url || "")] || {};
+    const reviewStatus = status.status || sample.review_status || (sample.confirmed_for_training ? "confirmed" : sample.negative_added ? "negative" : "pending");
+    const sampleTimeEpoch = Number(sample.sample_time_epoch ?? sample.captured_at_epoch ?? sample.created_at_epoch ?? sample.source_mtime_epoch ?? 0);
+    const sampleTime = sample.sample_time || sample.captured_at || sample.created_at || sample.source_modified_at || "";
     return {
-      id: String(sample.id || sample.path || sample.url || `sample-${index}`),
+      id,
       url: this.normalizeReviewUrl(rawUrl),
       label: String(label),
       duration: Number(sample.duration ?? sample.duration_s ?? 0),
       score: Number(sample.score ?? sample.model_score ?? NaN),
       detectedByModel: detected === undefined ? undefined : Boolean(detected),
       missedByModel: Boolean(missed),
+      trainingMode: Boolean(sample.training_mode || sample.training_session_id),
+      trainingSessionId: sample.training_session_id || "",
+      reviewStatus,
+      confirmedForTraining: Boolean(status.confirmed_for_training || sample.confirmed_for_training || reviewStatus === "confirmed"),
+      negativeAdded: Boolean(status.negative_added || sample.negative_added || reviewStatus === "negative"),
+      destinationPath: String(status.destination_path || sample.destination_path || ""),
+      sampleTimeEpoch: Number.isFinite(sampleTimeEpoch) ? sampleTimeEpoch : 0,
+      sampleTime: String(sampleTime || ""),
+      whenLabel: this.formatSampleTime(sampleTimeEpoch, sampleTime),
       path: String(sample.path || sample.url || ""),
     };
   }
 
   getReviewManifestUrl() {
     return this.reviewManifestUrl || this.config?.review_manifest_url || "/local/wakeword/wakeword-sample-candidates.json";
+  }
+
+  getReviewStatusUrl() {
+    return this.reviewStatusUrl || this.config?.review_status_url || "/local/wakeword/review-status.json";
+  }
+
+  reviewSampleId(sample, index) {
+    if (sample.id !== undefined && sample.id !== null && sample.id !== "") return String(sample.id);
+    const fields = ["path", "url", "source_path", "start_seconds", "end_seconds", "duration"]
+      .map((key) => sample[key])
+      .filter((value) => value !== undefined && value !== null && value !== "");
+    return fields.length ? fields.map((value) => String(value)).join("|") : `sample-${index}`;
+  }
+
+  formatSampleTime(epoch, value) {
+    let date = null;
+    if (Number.isFinite(epoch) && epoch > 0) {
+      date = new Date(epoch * 1000);
+    } else if (value) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) date = parsed;
+    }
+    if (!date) return "время неизвестно";
+    return date.toLocaleString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
   }
 
   normalizeReviewUrl(rawUrl) {
@@ -384,14 +457,49 @@ class WakewordCollectionCard extends HTMLElement {
     this.renderReview();
   }
 
+  async reviewCandidateAction(action, sampleId) {
+    const sample = (this.reviewSamples || []).find((item) => item.id === sampleId);
+    if (!sample || sample.busy) return;
+    sample.busy = true;
+    this.renderReview();
+    try {
+      const service = action === "confirm" ? "wakeword_review_candidate_confirm" : "wakeword_review_candidate_negative";
+      await this.call("shell_command", service, { sample_id: sample.id });
+      sample.reviewStatus = action === "confirm" ? "confirmed" : "negative";
+      sample.confirmedForTraining = action === "confirm";
+      sample.negativeAdded = action === "negative";
+      await this.loadReviewStatuses(true);
+      this.playSound(action === "confirm" ? "success" : "click");
+    } catch (error) {
+      this.reviewError = error?.message || String(error);
+      this.playSound("warn");
+    } finally {
+      sample.busy = false;
+      this.renderReview();
+    }
+  }
+
+  confirmReviewSample(sampleId) {
+    this.reviewCandidateAction("confirm", sampleId);
+  }
+
+  addReviewSampleToNegative(sampleId) {
+    this.reviewCandidateAction("negative", sampleId);
+  }
+
   deleteReviewSample(sampleId) {
-    const deleted = this.deletedReviewSamples();
-    deleted.add(sampleId);
-    this.storeDeletedReviewSamples(deleted);
-    const wasCurrent = this.reviewVisibleSamples()[this.reviewIndex]?.id === sampleId;
-    this.reviewSamples = (this.reviewSamples || []).filter((sample) => sample.id !== sampleId);
-    if (wasCurrent) this.pauseReviewPlaylist();
-    this.reviewIndex = Math.min(this.reviewIndex || 0, Math.max(0, this.reviewVisibleSamples().length - 1));
+    this.addReviewSampleToNegative(sampleId);
+  }
+
+  updateReviewSampleStatuses(statuses = {}) {
+    for (const sample of this.reviewSamples || []) {
+      const status = statuses[sample.id];
+      if (!status) continue;
+      sample.reviewStatus = status.status || sample.reviewStatus;
+      sample.confirmedForTraining = Boolean(status.confirmed_for_training || sample.reviewStatus === "confirmed");
+      sample.negativeAdded = Boolean(status.negative_added || sample.reviewStatus === "negative");
+      sample.destinationPath = String(status.destination_path || sample.destinationPath || "");
+    }
     this.renderReview();
   }
 
@@ -625,6 +733,14 @@ class WakewordCollectionCard extends HTMLElement {
           font-size: 11px;
           line-height: 1.2;
         }
+        .metric.pulse {
+          animation: metricPulse 0.55s ease;
+        }
+        @keyframes metricPulse {
+          0% { box-shadow: 0 0 0 0 rgba(15, 143, 100, 0.0); }
+          35% { box-shadow: 0 0 0 7px rgba(15, 143, 100, 0.18); }
+          100% { box-shadow: 0 0 0 0 rgba(15, 143, 100, 0.0); }
+        }
         .controls {
           display: grid;
           grid-template-columns: repeat(4, minmax(120px, 1fr));
@@ -722,6 +838,14 @@ class WakewordCollectionCard extends HTMLElement {
           border-color: rgba(20, 124, 140, 0.62);
           box-shadow: inset 3px 0 0 var(--ww-teal);
         }
+        .sample.confirmed {
+          border-color: rgba(15, 143, 100, 0.60);
+          background: rgba(15, 143, 100, 0.10);
+        }
+        .sample.negative {
+          border-color: rgba(104, 115, 133, 0.34);
+          background: rgba(104, 115, 133, 0.10);
+        }
         .sample-main {
           min-width: 0;
         }
@@ -764,12 +888,29 @@ class WakewordCollectionCard extends HTMLElement {
           border-color: rgba(15, 143, 100, 0.34);
           background: rgba(15, 143, 100, 0.10);
         }
+        .badge.training {
+          color: var(--ww-teal);
+          border-color: rgba(20, 124, 140, 0.34);
+          background: rgba(20, 124, 140, 0.10);
+        }
+        .badge.confirmed {
+          color: var(--ww-good);
+          border-color: rgba(15, 143, 100, 0.34);
+          background: rgba(15, 143, 100, 0.12);
+        }
+        .badge.negative {
+          color: var(--ww-muted);
+          border-color: rgba(104, 115, 133, 0.34);
+          background: rgba(104, 115, 133, 0.12);
+        }
         .icon-btn {
           width: 40px;
           min-width: 40px;
           padding: 0;
           justify-content: center;
         }
+        .icon-btn.confirm { color: var(--ww-good); }
+        .icon-btn.negative { color: var(--ww-muted); }
         .sample-buttons {
           display: flex;
           gap: 7px;
@@ -1137,9 +1278,11 @@ class WakewordCollectionCard extends HTMLElement {
 
     const samples = this.reviewVisibleSamples();
     const missedCount = samples.filter((sample) => sample.missedByModel).length;
+    const confirmedCount = samples.filter((sample) => sample.confirmedForTraining).length;
+    const negativeCount = samples.filter((sample) => sample.negativeAdded).length;
     subtitle.textContent = this.reviewLoading
       ? "Загружаю manifest кандидатов..."
-      : `${samples.length} фрагментов, ${missedCount} требуют внимания: короткая фраза есть, модель ее не распознала.`;
+      : `${samples.length} фрагментов, новые сверху. ${missedCount} не распознаны моделью, ${confirmedCount} подтверждены, ${negativeCount} добавлены в шумовые negatives.`;
     playlistBtn.disabled = !samples.length;
     playlistBtn.innerHTML =
       `<ha-icon icon="${this.reviewPlaying ? "mdi:pause" : "mdi:play"}"></ha-icon>${this.reviewPlaying ? "Pause" : "Play"}`;
@@ -1164,8 +1307,11 @@ class WakewordCollectionCard extends HTMLElement {
     body.querySelectorAll("[data-review-play]").forEach((button) => {
       button.addEventListener("click", () => this.playReviewSample(Number(button.dataset.reviewPlay), false));
     });
-    body.querySelectorAll("[data-review-delete]").forEach((button) => {
-      button.addEventListener("click", () => this.deleteReviewSample(button.dataset.reviewDelete));
+    body.querySelectorAll("[data-review-confirm]").forEach((button) => {
+      button.addEventListener("click", () => this.confirmReviewSample(button.dataset.reviewConfirm));
+    });
+    body.querySelectorAll("[data-review-negative]").forEach((button) => {
+      button.addEventListener("click", () => this.addReviewSampleToNegative(button.dataset.reviewNegative));
     });
   }
 
@@ -1173,13 +1319,19 @@ class WakewordCollectionCard extends HTMLElement {
     const playing = this.reviewPlaying && this.reviewIndex === index;
     const score = Number.isFinite(sample.score) ? sample.score.toFixed(3) : "n/a";
     const duration = sample.duration > 0 ? `${sample.duration.toFixed(2)}s` : "duration n/a";
+    const statusBadge = sample.confirmedForTraining
+      ? `<span class="badge confirmed">подтверждено</span>`
+      : sample.negativeAdded
+        ? `<span class="badge negative">noise negative</span>`
+        : "";
+    const trainingBadge = sample.trainingMode ? `<span class="badge training">режим тренировки</span>` : "";
     const detectedBadge = sample.missedByModel
       ? `<span class="badge missed">missed by model</span>`
       : sample.detectedByModel === true
         ? `<span class="badge detected">detected</span>`
         : `<span class="badge">not detected</span>`;
     return `
-      <div class="sample ${sample.missedByModel ? "missed" : ""} ${playing ? "playing" : ""}">
+      <div class="sample ${sample.missedByModel ? "missed" : ""} ${playing ? "playing" : ""} ${sample.confirmedForTraining ? "confirmed" : ""} ${sample.negativeAdded ? "negative" : ""}">
         <button class="icon-btn" title="Play sample" data-review-play="${index}">
           <ha-icon icon="${playing ? "mdi:volume-high" : "mdi:play"}"></ha-icon>
         </button>
@@ -1187,24 +1339,64 @@ class WakewordCollectionCard extends HTMLElement {
           <div class="sample-title">
             <span>${this.escape(sample.label)}</span>
             ${detectedBadge}
+            ${statusBadge}
+            ${trainingBadge}
             <span class="badge">${this.escape(duration)}</span>
             <span class="badge">score ${this.escape(score)}</span>
+            <span class="badge">${this.escape(sample.whenLabel)}</span>
           </div>
           <div class="sample-path">${this.escape(sample.path || sample.url)}</div>
         </div>
         <div class="sample-buttons">
-          <button class="icon-btn" title="Hide from review queue" data-review-delete="${this.escape(sample.id)}">
-            <ha-icon icon="mdi:delete-outline"></ha-icon>
+          <button class="icon-btn confirm" title="Подтвердить для обучения" data-review-confirm="${this.escape(sample.id)}" ${sample.busy ? "disabled" : ""}>
+            <ha-icon icon="mdi:check-circle"></ha-icon>
+          </button>
+          <button class="icon-btn negative" title="Добавить в шумовые negative samples" data-review-negative="${this.escape(sample.id)}" ${sample.busy ? "disabled" : ""}>
+            <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
           </button>
         </div>
       </div>
     `;
   }
 
+  handleCaptureCounter(active, sessionId, observed) {
+    const current = {
+      active,
+      sessionId: String(sessionId || ""),
+      observed: Number.isFinite(observed) ? observed : 0,
+    };
+    if (!active) {
+      this.captureCounterState = current;
+      return;
+    }
+    const previous = this.captureCounterState;
+    const sameSession = previous?.active && previous.sessionId === current.sessionId;
+    if (!sameSession) {
+      this.captureCounterState = current;
+      return;
+    }
+    if (current.observed > previous.observed) {
+      this.playSound("click");
+      this.pulseObservedMetric();
+    }
+    this.captureCounterState = current;
+  }
+
+  pulseObservedMetric() {
+    const metric = this.shadowRoot?.getElementById("metricObserved")?.closest(".metric");
+    if (!metric) return;
+    metric.classList.remove("pulse");
+    window.requestAnimationFrame(() => metric.classList.add("pulse"));
+    clearTimeout(this.metricPulseTimer);
+    this.metricPulseTimer = setTimeout(() => metric.classList.remove("pulse"), 700);
+  }
+
   update() {
     if (!this.shadowRoot || !this._hass) return;
     const active = this.value("sensor.wakeword_positive_session") === "active";
     const observed = Number(this.attr("sensor.wakeword_positive_session", "captured_files_since_start", this.attr("sensor.wakeword_positive_session", "wake_files_since_start", 0)));
+    const sessionId = String(this.attr("sensor.wakeword_positive_session", "id", ""));
+    this.handleCaptureCounter(active, sessionId, observed);
     const expected = Number(this.attr("sensor.wakeword_positive_session", "expected_attempts", this.value("input_number.wakeword_collection_expected_attempts", 30))) || 30;
     const progress = expected > 0 ? Math.min(1, observed / expected) : 0;
     const planIndex = this.currentPlanIndex();
@@ -1236,7 +1428,7 @@ class WakewordCollectionCard extends HTMLElement {
     this.shadowRoot.getElementById("metricRecall").textContent = `${recall}%`;
     this.shadowRoot.getElementById("metricNext").textContent = `${planIndex + 1}/${WAKEWORD_PLAN.length}`;
     this.shadowRoot.getElementById("planSubtitle").textContent =
-      `Сделано блоков: ${this.value("counter.wakeword_collection_blocks_done", 0)}. После завершения следующий шаг выбирается автоматически.`;
+      `Сделано блоков: ${this.value("counter.wakeword_collection_blocks_done", 0)}. Завершить только останавливает запись; следующий шаг выбирайте вручную.`;
 
     this.setControlValue("phraseSelect", phrase);
     this.setControlValue("speakerSelect", speaker);
@@ -1262,15 +1454,16 @@ class WakewordCollectionCard extends HTMLElement {
     });
     this.updateDirection(location);
     this.updateMicOnly();
-    this.renderReview();
   }
 
   updateDirection(location) {
     const entityId = this.directionEntityId();
+    const levelEntity = this.levelEntityId();
     const raw = this.value(entityId, "");
-    const numeric = raw === "" ? NaN : Number(raw);
-    const confidence = Number(this.attr(entityId, "confidence", NaN));
-    const age = Number(this.attr(entityId, "age_seconds", NaN));
+    const fallbackDirection = this.attr(levelEntity, "direction_degrees", "");
+    const numeric = raw === "" ? Number(fallbackDirection) : Number(raw);
+    const confidence = Number(this.attr(entityId, "confidence", this.attr(levelEntity, "confidence", NaN)));
+    const age = Number(this.attr(entityId, "age_seconds", this.attr(levelEntity, "age_seconds", NaN)));
     const point = ROOM_POINTS.find((item) => item.id === location);
     const needle = this.shadowRoot.getElementById("needle");
     const text = this.shadowRoot.getElementById("directionText");
@@ -1292,8 +1485,8 @@ class WakewordCollectionCard extends HTMLElement {
     const directionEntity = this.directionEntityId();
     const rawDb = this.value(levelEntity, "");
     const db = rawDb === "" ? NaN : Number(rawDb);
-    const confidence = Number(this.attr(directionEntity, "confidence", NaN));
-    const age = Number(this.attr(directionEntity, "age_seconds", NaN));
+    const confidence = Number(this.attr(directionEntity, "confidence", this.attr(levelEntity, "confidence", NaN)));
+    const age = Number(this.attr(directionEntity, "age_seconds", this.attr(levelEntity, "age_seconds", NaN)));
     const level = Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 70) / 55)) : 0;
     const micFill = this.shadowRoot.getElementById("micFill");
     const micText = this.shadowRoot.getElementById("micText");
