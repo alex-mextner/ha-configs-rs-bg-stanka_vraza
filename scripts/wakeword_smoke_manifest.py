@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime as dt
 import hashlib
 import json
 import math
@@ -564,6 +565,53 @@ def spectral_centroid(samples: np.ndarray) -> float:
     return float(np.sum(freqs * spectrum) / total)
 
 
+def spectral_flatness(samples: np.ndarray) -> float:
+    if samples.size < 64:
+        return 1.0
+    windowed = samples * np.hanning(samples.size)
+    power = (np.abs(np.fft.rfft(windowed)) ** 2) + 1e-12
+    freqs = np.fft.rfftfreq(samples.size, 1.0 / SR)
+    band = power[(freqs >= 90.0) & (freqs <= 5_000.0)]
+    if band.size == 0:
+        return 1.0
+    geometric = math.exp(float(np.mean(np.log(band))))
+    arithmetic = float(np.mean(band))
+    return float(geometric / max(arithmetic, 1e-12))
+
+
+def music_likeness(samples: np.ndarray) -> float:
+    duration = samples.size / SR if samples.size else 0.0
+    if duration < 1.0:
+        return 0.0
+    rms = frame_rms(samples, frame=int(0.05 * SR), hop=int(0.025 * SR))
+    if rms.size < 4:
+        return 0.0
+    mean_rms = float(np.mean(rms))
+    if mean_rms <= 1e-6:
+        return 0.0
+    rms_cv = float(np.std(rms) / mean_rms)
+    active_ratio = float(np.count_nonzero(rms > max(mean_rms * 0.55, 0.004)) / rms.size)
+    peak_ratio = float(np.max(rms) / mean_rms)
+    centroid = spectral_centroid(samples)
+    flatness = spectral_flatness(samples)
+    zcr = zero_crossing_rate(samples)
+
+    score = 0.0
+    if duration >= 1.35 and rms_cv < 0.28 and active_ratio > 0.70:
+        score += 0.40
+    if peak_ratio < 2.1:
+        score += 0.18
+    if centroid > 2_100.0 and zcr > 0.11:
+        score += 0.24
+    if flatness < 0.08 and centroid > 450.0:
+        score += 0.20
+    return min(1.0, score)
+
+
+def is_music_like(samples: np.ndarray) -> bool:
+    return music_likeness(samples) >= 0.58
+
+
 def find_voice_like_fragments(
     path: Path,
     samples: np.ndarray,
@@ -597,7 +645,7 @@ def find_voice_like_fragments(
         segments.append((start, active.size))
 
     merged: list[tuple[int, int]] = []
-    merge_gap = int(0.18 / 0.01)
+    merge_gap = int(0.45 / 0.01)
     for begin, end in segments:
         if merged and begin - merged[-1][1] <= merge_gap:
             merged[-1] = (merged[-1][0], end)
@@ -617,6 +665,8 @@ def find_voice_like_fragments(
         zcr = zero_crossing_rate(clip)
         centroid = spectral_centroid(clip)
         if energy < min_rms or not (0.005 <= zcr <= 0.40) or not (80.0 <= centroid <= 4_500.0):
+            continue
+        if is_music_like(clip):
             continue
         fragments.append(
             Fragment(
@@ -639,11 +689,118 @@ def clip_name(fragment: Fragment, index: int) -> str:
     return f"{index:05d}_{stem}_{fragment.start_seconds:.2f}s_{digest}.wav"
 
 
+def fragment_id(fragment: Fragment) -> str:
+    return hashlib.sha1(
+        f"{fragment.source_path}:{fragment.start_seconds:.3f}:{fragment.end_seconds:.3f}".encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def iso_utc(epoch: float) -> str:
+    return dt.datetime.fromtimestamp(epoch, dt.UTC).isoformat()
+
+
+def parse_iso_epoch(value: object) -> float | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    return parsed.timestamp()
+
+
+def wav_duration_seconds(path: Path) -> float | None:
+    try:
+        with wave.open(str(path), "rb") as handle:
+            rate = handle.getframerate()
+            frames = handle.getnframes()
+    except (EOFError, OSError, wave.Error):
+        return None
+    if rate <= 0 or frames <= 0:
+        return None
+    return frames / rate
+
+
+def sample_time_epoch(path: Path, source_duration: float | None, start_seconds: float) -> float:
+    mtime = path.stat().st_mtime
+    if source_duration and source_duration > 0:
+        return mtime - source_duration + start_seconds
+    return mtime
+
+
+def load_training_intervals(dataset_root: Path) -> list[dict[str, Any]]:
+    session_root = dataset_root / "positive_sessions"
+    intervals: list[dict[str, Any]] = []
+    files = list(session_root.glob("*.summary.json")) if session_root.exists() else []
+    current = session_root / "current.json"
+    if current.exists():
+        files.append(current)
+
+    for path in files:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        started = parse_iso_epoch(data.get("started_at"))
+        finished = parse_iso_epoch(data.get("finished_at")) or time.time()
+        if started is None:
+            continue
+        intervals.append(
+            {
+                "id": data.get("id") or path.stem,
+                "started_at_epoch": started,
+                "finished_at_epoch": finished,
+                "phrase": data.get("phrase"),
+                "speaker": data.get("speaker"),
+                "style": data.get("style"),
+                "location": data.get("location"),
+            }
+        )
+    return intervals
+
+
+def training_session_for_time(epoch: float, intervals: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    for item in intervals:
+        started = float(item["started_at_epoch"]) - 2.0
+        finished = float(item["finished_at_epoch"]) + 2.0
+        if started <= epoch <= finished:
+            return item
+    return None
+
+
+def training_meta_from_sidecar(path: Path) -> dict[str, Any]:
+    meta_path = path.with_suffix(".json")
+    if not meta_path.exists():
+        return {}
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        "id": data.get("session_id"),
+        "phrase": data.get("phrase"),
+        "speaker": data.get("speaker"),
+        "style": data.get("style"),
+        "location": data.get("location"),
+    }
+
+
+def is_real_training_path(path: Path) -> bool:
+    parts = set(path.parts)
+    return "positives" in parts and "real_user" in parts
+
+
 def run_mine(args: argparse.Namespace) -> dict[str, Any]:
     model = load_model(args.model)
     roots = discover_audio_roots(args.audio_root)
     paths = list_scan_wavs(roots, args.max_files)
     args.clip_root.mkdir(parents=True, exist_ok=True)
+    training_intervals = load_training_intervals(args.dataset_root)
 
     fragments: list[dict[str, Any]] = []
     skipped: dict[str, int] = {}
@@ -669,15 +826,34 @@ def run_mine(args: argparse.Namespace) -> dict[str, Any]:
         for candidate in candidates:
             score = score_with_model(model, candidate.samples)
             detected = score >= threshold
+            candidate_id = fragment_id(candidate)
+            source_duration = wav_duration_seconds(candidate.source_path)
+            captured_epoch = sample_time_epoch(candidate.source_path, source_duration, candidate.start_seconds)
+            training_session = training_session_for_time(captured_epoch, training_intervals)
+            sidecar_training = training_meta_from_sidecar(candidate.source_path)
+            training_mode = training_session is not None or is_real_training_path(candidate.source_path)
+            training_session_id = (
+                (training_session.get("id") if training_session else None)
+                or sidecar_training.get("id")
+            )
             output_path = args.clip_root / clip_name(candidate, len(fragments) + 1)
             write_wav(output_path, candidate.samples)
             fragments.append(
                 {
+                    "id": candidate_id,
                     "path": str(output_path),
                     "source_path": str(candidate.source_path),
                     "start_seconds": round(candidate.start_seconds, 3),
                     "end_seconds": round(candidate.end_seconds, 3),
                     "duration": round(candidate.duration, 3),
+                    "source_duration_seconds": round(source_duration, 3) if source_duration is not None else None,
+                    "sample_time_epoch": captured_epoch,
+                    "sample_time": iso_utc(captured_epoch),
+                    "training_mode": training_mode,
+                    "training_session_id": training_session_id,
+                    "review_status": "pending",
+                    "confirmed_for_training": False,
+                    "negative_added": False,
                     "score": score,
                     "energy": candidate.energy,
                     "detected_by_model": detected,
@@ -689,12 +865,17 @@ def run_mine(args: argparse.Namespace) -> dict[str, Any]:
         if len(fragments) >= args.max_candidates:
             break
 
-    fragments.sort(key=lambda item: (item["missed_by_model"], item["energy"]), reverse=True)
+    fragments.sort(key=lambda item: (item["sample_time_epoch"], item["missed_by_model"], item["energy"]), reverse=True)
+    created_at_epoch = time.time()
     manifest = {
-        "created_at_epoch": time.time(),
+        "created_at_epoch": created_at_epoch,
+        "created_at": iso_utc(created_at_epoch),
         "model_path": str(args.model),
         "model_kind": model.get("kind"),
         "threshold": threshold,
+        "candidate_min_duration_seconds": args.min_duration,
+        "candidate_max_duration_seconds": args.max_duration,
+        "music_filter": "enabled",
         "audio_roots": [str(path) for path in roots],
         "files_seen": len(paths),
         "files_processed": files_processed,
@@ -724,7 +905,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     all_cmd = subparsers.add_parser("all", help="run train-eval and then mine-fragments")
     add_train_args(all_cmd)
-    add_mine_args(all_cmd, include_model=False)
+    add_mine_args(all_cmd, include_model=False, include_dataset_root=False)
     all_cmd.set_defaults(func=run_all)
     return parser
 
@@ -741,9 +922,15 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-existing-seconds", type=float, default=3.0)
 
 
-def add_mine_args(parser: argparse.ArgumentParser, include_model: bool = True) -> None:
+def add_mine_args(
+    parser: argparse.ArgumentParser,
+    include_model: bool = True,
+    include_dataset_root: bool = True,
+) -> None:
     if include_model:
         parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    if include_dataset_root:
+        parser.add_argument("--dataset-root", type=Path, default=DEFAULT_DATASET_ROOT)
     parser.add_argument("--audio-root", type=Path, action="append", default=None)
     parser.add_argument("--output", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--clip-root", type=Path, default=DEFAULT_CLIPS)
@@ -751,8 +938,8 @@ def add_mine_args(parser: argparse.ArgumentParser, include_model: bool = True) -
     parser.add_argument("--max-file-seconds", type=float, default=180.0)
     parser.add_argument("--max-candidates", type=int, default=200)
     parser.add_argument("--max-candidates-per-file", type=int, default=12)
-    parser.add_argument("--min-duration", type=float, default=0.28)
-    parser.add_argument("--max-duration", type=float, default=2.4)
+    parser.add_argument("--min-duration", type=float, default=1.0)
+    parser.add_argument("--max-duration", type=float, default=3.0)
     parser.add_argument("--sensitivity", type=float, default=2.5)
     parser.add_argument("--min-rms", type=float, default=0.006)
 

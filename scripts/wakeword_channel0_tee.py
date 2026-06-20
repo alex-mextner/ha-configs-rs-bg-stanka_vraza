@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--positive-root", type=Path)
     parser.add_argument("--positive-pre-roll-seconds", type=float, default=0.6)
     parser.add_argument("--positive-end-silence-seconds", type=float, default=0.6)
-    parser.add_argument("--positive-min-seconds", type=float, default=0.45)
+    parser.add_argument("--positive-min-seconds", type=float, default=1.0)
     parser.add_argument("--positive-max-seconds", type=float, default=3.0)
     parser.add_argument("--positive-start-margin-db", type=float, default=8.0)
     parser.add_argument("--positive-end-margin-db", type=float, default=4.0)
@@ -290,8 +290,10 @@ class PositiveSessionRecorder:
 
         complete_by_silence = self.current_frames >= self.min_frames and self.silence_frames >= self.end_silence_frames
         complete_by_length = self.current_frames >= self.max_frames
-        if complete_by_silence or complete_by_length:
-            self._finish_clip(reason="silence" if complete_by_silence else "max_length")
+        if complete_by_silence:
+            self._finish_clip(reason="silence")
+        elif complete_by_length:
+            self._discard_clip(reason="continued_past_max")
 
     def _load_session_if_needed(self) -> None:
         assert self.session_file is not None
@@ -398,6 +400,15 @@ class PositiveSessionRecorder:
         }
         path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"[wakeword-positive] captured {path}", file=sys.stderr, flush=True)
+        self._reset_recording()
+
+    def _discard_clip(self, reason: str) -> None:
+        duration = self.current_frames / self.sample_rate if self.sample_rate else 0.0
+        print(
+            f"[wakeword-positive] discarded {duration:.2f}s candidate: {reason}",
+            file=sys.stderr,
+            flush=True,
+        )
         self._reset_recording()
 
 

@@ -6,8 +6,9 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import shutil
+import os
 import re
+import shutil
 from pathlib import Path
 
 
@@ -56,6 +57,31 @@ def session_output_dir(dataset_root: Path, session: dict) -> Path:
     return dataset_root / "positives" / "real_user" / f"{session['id']}_{session_slug}"
 
 
+def set_capture_permissions(path: Path, uid: int, gid: int, mode: int = 0o775) -> None:
+    try:
+        os.chown(path, uid, gid)
+    except (AttributeError, PermissionError, OSError):
+        pass
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass
+
+
+def prepare_capture_dir(path: Path, uid: int, gid: int) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    set_capture_permissions(path, uid, gid, 0o775)
+
+
+def write_json_file(path: Path, data: dict, uid: int, gid: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    set_capture_permissions(tmp, uid, gid, 0o664)
+    tmp.replace(path)
+    set_capture_permissions(path, uid, gid, 0o664)
+
+
 def captured_files_for_session(dataset_root: Path, session: dict) -> list[Path]:
     out_dir = session_output_dir(dataset_root, session)
     if not out_dir.exists():
@@ -65,7 +91,7 @@ def captured_files_for_session(dataset_root: Path, session: dict) -> list[Path]:
 
 def command_start(args: argparse.Namespace) -> int:
     sessions = session_dir(args.dataset_root)
-    sessions.mkdir(parents=True, exist_ok=True)
+    prepare_capture_dir(sessions, args.capture_uid, args.capture_gid)
     started_at = now_utc()
     session = {
         "id": started_at.strftime("%Y%m%dT%H%M%SZ"),
@@ -79,11 +105,8 @@ def command_start(args: argparse.Namespace) -> int:
     }
     session["output_name"] = slug(session_output_dir(Path(""), session).name)
     session["output_dir"] = str(session_output_dir(args.dataset_root, session))
-    Path(session["output_dir"]).mkdir(parents=True, exist_ok=True)
-    current_session_path(args.dataset_root).write_text(
-        json.dumps(session, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    prepare_capture_dir(Path(session["output_dir"]), args.capture_uid, args.capture_gid)
+    write_json_file(current_session_path(args.dataset_root), session, args.capture_uid, args.capture_gid)
     print(json.dumps(session, ensure_ascii=False, indent=2))
     return 0
 
@@ -102,7 +125,7 @@ def command_finish(args: argparse.Namespace) -> int:
     started_at = parse_time(session["started_at"])
     wake_files = wake_files_since(args.debug_root, started_at)
     out_dir = session_output_dir(args.dataset_root, session)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    prepare_capture_dir(out_dir, args.capture_uid, args.capture_gid)
 
     captured = [
         {"output": str(path), "bytes": path.stat().st_size}
@@ -113,6 +136,7 @@ def command_finish(args: argparse.Namespace) -> int:
         for index, src in enumerate(wake_files, start=1):
             dst = out_dir / f"{session['id']}_{index:03d}_{src.name}"
             shutil.copy2(src, dst)
+            set_capture_permissions(dst, args.capture_uid, args.capture_gid, 0o664)
             copied.append({"source": str(src), "output": str(dst), "bytes": dst.stat().st_size})
         captured = [
             {"output": str(path), "bytes": path.stat().st_size}
@@ -137,7 +161,7 @@ def command_finish(args: argparse.Namespace) -> int:
         "fallback_wake_copies": copied,
     }
     summary_path = session_dir(args.dataset_root) / f"{session['id']}.summary.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_file(summary_path, summary, args.capture_uid, args.capture_gid)
     current_session_path(args.dataset_root).unlink(missing_ok=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
@@ -178,6 +202,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", type=Path, default=Path("/home/ultra/oww-dataset"))
     parser.add_argument("--debug-root", type=Path, default=Path("/home/ultra/wyoming-debug"))
+    parser.add_argument("--capture-uid", type=int, default=int(os.environ.get("WAKEWORD_CAPTURE_UID", "1000")))
+    parser.add_argument("--capture-gid", type=int, default=int(os.environ.get("WAKEWORD_CAPTURE_GID", "1000")))
     sub = parser.add_subparsers(required=True)
 
     start = sub.add_parser("start")

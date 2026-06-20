@@ -112,6 +112,20 @@ shell_command:
     --debug-root /config/wyoming-debug
     finish
     --expected-attempts {{ expected_attempts }}
+  wakeword_review_candidate_confirm: >-
+    python3 /config/scripts/wakeword_review_candidate.py
+    confirm
+    --sample-id '{{ sample_id }}'
+    --manifest /config/www/wakeword/wakeword-sample-candidates.json
+    --dataset-root /config/oww-dataset
+    --www-root /config/www/wakeword
+  wakeword_review_candidate_negative: >-
+    python3 /config/scripts/wakeword_review_candidate.py
+    negative
+    --sample-id '{{ sample_id }}'
+    --manifest /config/www/wakeword/wakeword-sample-candidates.json
+    --dataset-root /config/oww-dataset
+    --www-root /config/www/wakeword
 
 command_line:
   - sensor:
@@ -264,12 +278,6 @@ script:
       - service: input_boolean.turn_off
         target:
           entity_id: input_boolean.wakeword_collection_active
-      - service: counter.increment
-        target:
-          entity_id: counter.wakeword_collection_blocks_done
-      - service: input_number.increment
-        target:
-          entity_id: input_number.wakeword_collection_plan_step
       - service: persistent_notification.create
         data:
           title: "Запись wake word завершена"
