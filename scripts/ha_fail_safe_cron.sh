@@ -15,5 +15,7 @@ if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-ha >> "$LOG" 2>&1; 
 fi
 
 if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-dataplicity >> "$LOG" 2>&1; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dataplicity check failed while local HA is online; warning only, no HA restart" >> "$LOG"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dataplicity check failed while local HA is online; running dataplicity fix..." >> "$LOG"
+    /home/ultra/homeassistant/scripts/ha_fail_safe.sh fix-dataplicity >> "$LOG" 2>&1
+    exit $?
 fi

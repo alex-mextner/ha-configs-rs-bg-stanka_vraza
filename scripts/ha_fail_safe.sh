@@ -9,8 +9,10 @@ LOG_DIR="/tmp/ha_fail_safe"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$(date +%Y%m%d_%H%M%S).log"
 RESTART_HISTORY="$LOG_DIR/restart_history"
+DATAPLICITY_RELOAD_HISTORY="$LOG_DIR/dataplicity_reload_history"
 MAX_RESTARTS_PER_WINDOW="${HA_MAX_RESTARTS_PER_WINDOW:-3}"
 RESTART_WINDOW_SEC="${HA_RESTART_WINDOW_SEC:-3600}"
+DATAPLICITY_RELOAD_COOLDOWN_SEC="${DATAPLICITY_RELOAD_COOLDOWN_SEC:-900}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
@@ -70,22 +72,31 @@ get_dataplicity_url() {
 DATAPLICITY_URL="${DATAPLICITY_URL:-$(get_dataplicity_url)}"
 if [ -z "$DATAPLICITY_URL" ]; then
     log "⚠ Could not determine Dataplicity URL from core.config"
-    DATAPLICITY_URL="https://shuddery-wren-6033.dataplicity.io/"
+    DATAPLICITY_URL="https://spry-gazelle-4693.dataplicity.io/"
 fi
 
 check_ha() {
-    local url="${HA_URL:-http://localhost:8123}"
+    local url="${HA_URL:-http://127.0.0.1:8123}"
+    local api_url="${url%/}/api/"
+    local container="${HA_CONTAINER:-homeassistant-homeassistant-1}"
     local response="000"
+    local health=""
     local attempt
 
     for attempt in 1 2 3; do
-        response=$(curl -sS --connect-timeout 5 -m 8 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
-        if [ "$response" = "200" ]; then
+        response=$(curl -sS --connect-timeout 5 -m 12 -o /dev/null -w '%{http_code}' "$api_url" 2>/dev/null || true)
+        if [ "$response" = "200" ] || [ "$response" = "401" ]; then
             log "✓ HA is accessible (HTTP $response)"
             return 0
         fi
         [ "$attempt" -lt 3 ] && sleep 2
     done
+
+    health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)
+    if [ "$health" = "healthy" ]; then
+        log "✓ HA API probe returned HTTP ${response:-000}, but container health is healthy"
+        return 0
+    fi
 
     log "✗ HA is NOT accessible (HTTP ${response:-000})"
     return 1
@@ -170,28 +181,83 @@ fix_dataplicity() {
         return 2
     fi
 
-    # Anti-flap: skip if HA was restarted < 10 min ago
-    local uptime_sec=$(docker inspect --format='{{.State.StartedAt}}' homeassistant-homeassistant-1 2>/dev/null | xargs -I{} python3 -c "import datetime,sys; d=datetime.datetime.fromisoformat('{}'.replace('Z','+00:00')); print(int((datetime.datetime.now(datetime.timezone.utc)-d).total_seconds()))")
-    if [ -n "$uptime_sec" ] && [ "$uptime_sec" -lt 600 ]; then
-        log "⚠ HA container up only ${uptime_sec}s (< 10 min), skipping dataplicity restart to prevent loop"
+    log "Attempting to fix dataplicity tunnel by reloading only the Dataplicity config entry..."
+    if ! reload_dataplicity_entry; then
+        log "✗ Dataplicity config entry reload failed"
         return 1
     fi
 
-    log "Attempting to fix dataplicity tunnel (will restart HA container)..."
-    restart_ha
-    local result=$?
-    if [ $result -eq 0 ]; then
-        log "Waiting 90s for dataplicity m2m to reconnect..."
-        sleep 90
-        if check_dataplicity; then
-            log "✓ Dataplicity tunnel recovered after restart"
-            return 0
-        else
-            log "✗ Dataplicity tunnel still offline after restart"
+    log "Waiting 75s for dataplicity m2m to reconnect..."
+    sleep 75
+    if check_dataplicity; then
+        log "✓ Dataplicity tunnel recovered after config entry reload"
+        return 0
+    fi
+
+    log "✗ Dataplicity tunnel still offline after config entry reload"
+    return 1
+}
+
+reload_dataplicity_entry() {
+    local entry_id token response body_file status now last_reload age
+    body_file=$(mktemp "$LOG_DIR/dataplicity_reload_body.XXXXXX")
+
+    now=$(date +%s)
+    last_reload=$(tail -n 1 "$DATAPLICITY_RELOAD_HISTORY" 2>/dev/null || true)
+    if [ -n "$last_reload" ]; then
+        age=$((now - last_reload))
+        if [ "$age" -lt "$DATAPLICITY_RELOAD_COOLDOWN_SEC" ]; then
+            log "Dataplicity reload cooldown active (${age}s < ${DATAPLICITY_RELOAD_COOLDOWN_SEC}s); skipping reload"
+            rm -f "$body_file"
             return 1
         fi
     fi
-    return 1
+
+    entry_id=$(python3 - << 'PYEOF'
+import json
+
+with open("/home/ultra/homeassistant/.storage/core.config_entries") as f:
+    data = json.load(f)
+
+for entry in data["data"]["entries"]:
+    if entry.get("domain") == "dataplicity":
+        print(entry["entry_id"])
+        break
+PYEOF
+)
+    if [ -z "$entry_id" ]; then
+        log "Dataplicity config entry not found"
+        rm -f "$body_file"
+        return 1
+    fi
+
+    token=$(sed -n 's/^HA_TOKEN=//p' /home/ultra/.env | tail -n 1)
+    if [ -z "$token" ]; then
+        log "HA_TOKEN not found in /home/ultra/.env"
+        rm -f "$body_file"
+        return 1
+    fi
+
+    response=$(curl -sS --connect-timeout 5 -m 30 \
+        -X POST \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -d "{\"entry_id\":\"$entry_id\"}" \
+        -o "$body_file" \
+        -w '%{http_code}' \
+        http://127.0.0.1:8123/api/services/homeassistant/reload_config_entry 2>/dev/null || true)
+
+    status=1
+    if [ "$response" = "200" ]; then
+        log "✓ Dataplicity config entry reload requested"
+        echo "$now" >> "$DATAPLICITY_RELOAD_HISTORY"
+        status=0
+    else
+        log "✗ Dataplicity config entry reload returned HTTP ${response:-000}: $(cat "$body_file")"
+    fi
+
+    rm -f "$body_file"
+    return "$status"
 }
 
 fix_orphaned() {
@@ -261,7 +327,10 @@ restart_ha() {
 
     log "Restarting container: $container"
     record_restart_attempt
-    docker restart "$container" 2>&1 | tee -a "$LOG"
+    if ! docker restart "$container" 2>&1 | tee -a "$LOG"; then
+        log "✗ Docker restart command failed"
+        return 1
+    fi
 
     log "Waiting for HA to come back (max 120s)..."
     local count=0
@@ -365,7 +434,8 @@ case "${1:-status}" in
         log "Running full fix cycle..."
         if check_ha; then
             if ! check_dataplicity; then
-                log "Dataplicity check failed while local HA is online; not restarting HA automatically"
+                log "Dataplicity check failed while local HA is online; running dataplicity fix"
+                fix_dataplicity || true
             fi
         else
             fix_orphaned || true
