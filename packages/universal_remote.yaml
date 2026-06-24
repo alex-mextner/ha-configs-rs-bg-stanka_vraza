@@ -1006,6 +1006,7 @@ automation:
     action:
       - variables:
           ev: "{{ trigger.to_state.attributes.event_type }}"
+          ac_cooling_season: "{{ now().month in [5, 6, 7, 8, 9] }}"
       - choose:
           - conditions: "{{ ev == 'prime_hold' }}"
             sequence:
@@ -1013,7 +1014,8 @@ automation:
                   current_mode: >-
                     {{ states('climate.kondei_1') }}
                   new_mode: >-
-                    {{ 'heat' if current_mode == 'cool' else 'cool' }}
+                    {{ 'cool' if (ac_cooling_season | bool) else
+                       ('heat' if current_mode == 'cool' else 'cool') }}
               - action: climate.set_hvac_mode
                 target: { entity_id: climate.kondei_1 }
                 data: { hvac_mode: "{{ new_mode }}" }
@@ -1039,7 +1041,9 @@ automation:
                       - action: climate.set_hvac_mode
                         target: { entity_id: climate.kondei_1 }
                         data:
-                          hvac_mode: "{{ states('input_text.ac_last_mode') | default('cool', true) }}"
+                          hvac_mode: >-
+                            {{ 'cool' if (ac_cooling_season | bool) else
+                               (states('input_text.ac_last_mode') | default('cool', true)) }}
                   - conditions: "{{ states('climate.kondei_1') in ['unknown', 'unavailable'] }}"
                     sequence:
                       - stop: "AC state is unavailable; suppress toggle"
@@ -1059,13 +1063,45 @@ automation:
     condition:
       - condition: template
         value_template: >-
-          {{ trigger.to_state is not none and
-             trigger.to_state.state not in ['off', 'unknown', 'unavailable'] and
-             trigger.to_state.state != states('input_text.ac_last_mode') }}
+          {% set mode = trigger.to_state.state if trigger.to_state is not none else none %}
+          {{ mode not in ['off', 'unknown', 'unavailable', none] and
+             not (now().month in [5, 6, 7, 8, 9] and mode == 'heat') and
+             mode != states('input_text.ac_last_mode') }}
     action:
       - action: input_text.set_value
         target: { entity_id: input_text.ac_last_mode }
         data: { value: "{{ trigger.to_state.state }}" }
+
+  # ===== Summer AC guard =====
+  # Cooling season is May through September. During that period, any accidental
+  # heat command from Alice/Yandex or another integration is corrected to cool.
+  - alias: Force AC cooling in summer
+    id: ac_force_cooling_summer
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id: climate.kondei_1
+      - platform: homeassistant
+        event: start
+    condition:
+      - condition: template
+        value_template: >-
+          {% set mode = states('climate.kondei_1') %}
+          {% set from_mode =
+             trigger.from_state.state
+             if trigger is defined and trigger.from_state is defined and
+                trigger.from_state is not none
+             else none %}
+          {{ now().month in [5, 6, 7, 8, 9] and
+             mode not in ['off', 'cool', 'unknown', 'unavailable'] and
+             (mode == 'heat' or from_mode in ['off', 'unknown', 'unavailable']) }}
+    action:
+      - action: climate.set_hvac_mode
+        target: { entity_id: climate.kondei_1 }
+        data: { hvac_mode: cool }
+      - action: input_text.set_value
+        target: { entity_id: input_text.ac_last_mode }
+        data: { value: cool }
 
   # ===== Disney: open Kodi (short) / play next episode (hold) =====
   - alias: Universal Remote Disney
