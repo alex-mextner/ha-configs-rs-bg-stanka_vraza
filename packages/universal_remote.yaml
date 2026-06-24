@@ -633,7 +633,8 @@ automation:
              and trigger.from_state.state not in ['unknown', 'unavailable']
              and (
                trigger.to_state.state != trigger.from_state.state or
-               trigger.to_state.attributes.event_type != trigger.from_state.attributes.event_type
+               trigger.to_state.attributes.event_type !=
+                 (trigger.from_state.attributes.event_type | default('', true))
              ) }}
     variables:
       # raw_button is the ESP event_type exactly as received.
@@ -756,6 +757,11 @@ automation:
                        else 'button.samsung_tv_mute' }}
 
           # ---- Haier AC via ch± ----
+          - conditions: >-
+              {{ button in ['channel_up', 'channel_down'] and
+                 states('climate.kondei_1') in ['off', 'unknown', 'unavailable'] }}
+            sequence:
+              - stop: "AC is off/unavailable; suppress temperature command"
           - conditions: "{{ button == 'channel_up' }}"
             sequence:
               - variables:
@@ -897,21 +903,21 @@ automation:
           - conditions: "{{ button == 'red' }}"
             sequence:
               - action: light.turn_on
-                target: { entity_id: light.ir_controller_esp32_c3_rgbw }
+                target: { entity_id: light.rgbw_lamp_rgbw }
                 data:
                   rgbw_color: [255, 0, 0, 0]
                   brightness: 255
           - conditions: "{{ button == 'green' }}"
             sequence:
               - action: light.turn_on
-                target: { entity_id: light.ir_controller_esp32_c3_rgbw }
+                target: { entity_id: light.rgbw_lamp_rgbw }
                 data:
                   rgbw_color: [0, 255, 0, 0]
                   brightness: 255
           - conditions: "{{ button == 'yellow' }}"
             sequence:
               - action: light.turn_on
-                target: { entity_id: light.ir_controller_esp32_c3_rgbw }
+                target: { entity_id: light.rgbw_lamp_rgbw }
                 data:
                   rgbw_color: [255, 255, 0, 0]
                   brightness: 255
@@ -989,8 +995,13 @@ automation:
         value_template: >-
           {{ trigger.to_state is not none and
              trigger.from_state is not none and
+             trigger.to_state.attributes.event_type is defined and
+             trigger.to_state.attributes.event_type not in ['', none, 'unknown', 'unavailable', 'undefined'] and
+             trigger.to_state.state not in ['unknown', 'unavailable'] and
              trigger.from_state.state not in ['unknown', 'unavailable'] and
-             trigger.to_state.state != trigger.from_state.state and
+             (trigger.to_state.state != trigger.from_state.state or
+              trigger.to_state.attributes.event_type !=
+                (trigger.from_state.attributes.event_type | default('', true))) and
              trigger.to_state.attributes.event_type in ['prime', 'prime_hold'] }}
     action:
       - variables:
@@ -1016,19 +1027,23 @@ automation:
                 continue_on_timeout: true
               - if: >-
                   {{ wait.trigger is not none and
-                     wait.trigger.to_state.attributes.event_type == 'prime_hold' }}
+                     (wait.trigger.to_state.attributes.event_type | default('', true)) == 'prime_hold' }}
                 then:
                   - stop: "hold detected, prime short suppressed"
               # Toggle: off → turn on in the LAST used mode (not a fixed
               # default); on → turn off. Stored by the "Remember AC last
               # mode" automation below.
-              - if: "{{ is_state('climate.kondei_1', 'off') }}"
-                then:
-                  - action: climate.set_hvac_mode
-                    target: { entity_id: climate.kondei_1 }
-                    data:
-                      hvac_mode: "{{ states('input_text.ac_last_mode') | default('cool', true) }}"
-                else:
+              - choose:
+                  - conditions: "{{ is_state('climate.kondei_1', 'off') }}"
+                    sequence:
+                      - action: climate.set_hvac_mode
+                        target: { entity_id: climate.kondei_1 }
+                        data:
+                          hvac_mode: "{{ states('input_text.ac_last_mode') | default('cool', true) }}"
+                  - conditions: "{{ states('climate.kondei_1') in ['unknown', 'unavailable'] }}"
+                    sequence:
+                      - stop: "AC state is unavailable; suppress toggle"
+                default:
                   - action: climate.turn_off
                     target: { entity_id: climate.kondei_1 }
 
@@ -1065,8 +1080,13 @@ automation:
         value_template: >-
           {{ trigger.to_state is not none and
              trigger.from_state is not none and
+             trigger.to_state.attributes.event_type is defined and
+             trigger.to_state.attributes.event_type not in ['', none, 'unknown', 'unavailable', 'undefined'] and
+             trigger.to_state.state not in ['unknown', 'unavailable'] and
              trigger.from_state.state not in ['unknown', 'unavailable'] and
-             trigger.to_state.state != trigger.from_state.state and
+             (trigger.to_state.state != trigger.from_state.state or
+              trigger.to_state.attributes.event_type !=
+                (trigger.from_state.attributes.event_type | default('', true))) and
              trigger.to_state.attributes.event_type in ['disney', 'disney_hold'] }}
     action:
       - variables:
@@ -1087,7 +1107,7 @@ automation:
                 continue_on_timeout: true
               - if: >-
                   {{ wait.trigger is not none and
-                     wait.trigger.to_state.attributes.event_type == 'disney_hold' }}
+                     (wait.trigger.to_state.attributes.event_type | default('', true)) == 'disney_hold' }}
                 then:
                   - stop: "hold detected, disney short suppressed"
               - action: script.source_to_pc
@@ -1149,8 +1169,13 @@ automation:
         value_template: >-
           {{ trigger.to_state is not none
              and trigger.from_state is not none
+             and trigger.to_state.attributes.event_type is defined
+             and trigger.to_state.attributes.event_type not in ['', none, 'unknown', 'unavailable', 'undefined']
+             and trigger.to_state.state not in ['unknown', 'unavailable']
              and trigger.from_state.state not in ['unknown', 'unavailable']
-             and trigger.to_state.state != trigger.from_state.state
+             and (trigger.to_state.state != trigger.from_state.state or
+                  trigger.to_state.attributes.event_type !=
+                    (trigger.from_state.attributes.event_type | default('', true)))
              and trigger.to_state.attributes.event_type == 'samsung_ir_source' }}
     action:
       # Wait for a direction (left/right) within 5s
@@ -1161,7 +1186,7 @@ automation:
         continue_on_timeout: true
       - variables:
           dir_ev: >-
-            {{ wait.trigger.to_state.attributes.event_type if wait.trigger else '' }}
+            {{ wait.trigger.to_state.attributes.event_type | default('', true) if wait.trigger else '' }}
       - if: "{{ dir_ev not in ['samsung_ir_left', 'samsung_ir_right'] }}"
         then:
           - stop: "no direction within 5s"
@@ -1173,7 +1198,7 @@ automation:
         continue_on_timeout: true
       - variables:
           confirm_ev: >-
-            {{ wait.trigger.to_state.attributes.event_type if wait.trigger else '' }}
+            {{ wait.trigger.to_state.attributes.event_type | default('', true) if wait.trigger else '' }}
       - if: "{{ confirm_ev != 'samsung_ir_ok' }}"
         then:
           - stop: "no OK confirm"
