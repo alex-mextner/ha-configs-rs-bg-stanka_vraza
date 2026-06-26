@@ -153,15 +153,25 @@ command_line:
   - sensor:
       name: "Wakeword Mic Direction"
       unique_id: wakeword_mic_direction
-      command: "python3 /config/scripts/wakeword_respeaker_direction.py"
-      scan_interval: 2
+      command: "python3 /config/scripts/wakeword_array_status.py --status-file /config/oww-dataset/wakeword_array_status.json json"
+      scan_interval: 1
       unit_of_measurement: "°"
-      value_template: "{{ value_json.direction if value_json.direction is not none else 'unknown' }}"
+      value_template: >-
+        {% if value_json.state == 'ok' and value_json.direction_degrees is not none %}
+          {{ value_json.direction_degrees }}
+        {% else %}
+          unknown
+        {% endif %}
       json_attributes:
-        - device_found
-        - voice_activity
+        - state
+        - updated_at
+        - age_seconds
+        - direction_degrees
+        - level_dbfs
+        - confidence
         - source
-        - error
+        - channel_rms
+        - channel_peaks
   - sensor:
       name: "Wakeword Mic Level"
       unique_id: wakeword_mic_level
@@ -181,6 +191,8 @@ command_line:
         - direction_degrees
         - confidence
         - source
+        - channel_rms
+        - channel_peaks
 
 template:
   - sensor:
