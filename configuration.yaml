@@ -131,7 +131,7 @@ homeassistant:
 lovelace:
   resource_mode: yaml
   resources:
-    - url: /local/wakeword/wakeword-collection-card.js?v=20260620b
+    - url: /local/wakeword/wakeword-collection-card.js?v=20260626a
       type: module
     - url: /webrtc/webrtc-camera.js?v=3.6.1
       type: module

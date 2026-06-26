@@ -157,6 +157,7 @@ class WakewordCollectionCard extends HTMLElement {
     this.reviewStatusUrl = this.config.review_status_url || "/local/wakeword/review-status.json";
     this.reviewPageSize = Number(this.config.review_page_size || 40);
     this.reviewRenderLimit = this.reviewPageSize;
+    this.reviewFilter = localStorage.getItem("wakewordReviewFilter") || this.config.review_filter || "hide_negative";
   }
 
   set hass(hass) {
@@ -281,6 +282,10 @@ class WakewordCollectionCard extends HTMLElement {
         .map((sample, index) => this.normalizeReviewSample(sample, index, statuses))
         .filter((sample) => sample.url)
         .sort((left, right) => (right.sampleTimeEpoch || 0) - (left.sampleTimeEpoch || 0));
+      const played = this.playedReviewSamples();
+      this.reviewSamples.forEach((sample) => {
+        sample.played = played.has(sample.id);
+      });
       this.reviewLoaded = true;
     } catch (error) {
       this.reviewSamples = [];
@@ -404,15 +409,91 @@ class WakewordCollectionCard extends HTMLElement {
     localStorage.setItem("wakewordReviewDeleted", JSON.stringify([...deleted]));
   }
 
+  playedReviewSamples() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("wakewordReviewPlayed") || "[]"));
+    } catch (_err) {
+      return new Set();
+    }
+  }
+
+  storePlayedReviewSamples(played) {
+    localStorage.setItem("wakewordReviewPlayed", JSON.stringify([...played]));
+  }
+
+  markReviewSamplePlayed(sample) {
+    if (!sample) return;
+    sample.played = true;
+    const played = this.playedReviewSamples();
+    played.add(sample.id);
+    this.storePlayedReviewSamples(played);
+  }
+
+  currentReviewFilter() {
+    return this.reviewFilter || localStorage.getItem("wakewordReviewFilter") || "hide_negative";
+  }
+
+  setReviewFilter(value) {
+    this.reviewFilter = value || "hide_negative";
+    localStorage.setItem("wakewordReviewFilter", this.reviewFilter);
+    this.reviewRenderLimit = this.reviewPageSize;
+    this.reviewIndex = 0;
+    this.reviewScrollTop = 0;
+    this.renderReview();
+  }
+
+  reviewFilterAllows(sample) {
+    const filter = this.currentReviewFilter();
+    if (filter === "all") return true;
+    if (filter === "pending") return !sample.confirmedForTraining && !sample.negativeAdded;
+    if (filter === "confirmed") return sample.confirmedForTraining;
+    if (filter === "negative") return sample.negativeAdded;
+    if (filter === "missed") return sample.missedByModel && !sample.negativeAdded;
+    return !sample.negativeAdded;
+  }
+
+  reviewFilteredSamples() {
+    return (this.reviewSamples || []).filter((sample) => this.reviewFilterAllows(sample));
+  }
+
   reviewVisibleSamples() {
     const limit = Math.max(1, Number(this.reviewRenderLimit || this.reviewPageSize || 40));
-    return (this.reviewSamples || []).slice(0, limit);
+    return this.reviewFilteredSamples().slice(0, limit);
   }
 
   showMoreReviewSamples() {
     const pageSize = Math.max(1, Number(this.reviewPageSize || 40));
-    this.reviewRenderLimit = Math.min((this.reviewSamples || []).length, Number(this.reviewRenderLimit || pageSize) + pageSize);
-    this.renderReview();
+    const filtered = this.reviewFilteredSamples();
+    const nextLimit = Math.min(filtered.length, Number(this.reviewRenderLimit || pageSize) + pageSize);
+    if (nextLimit === Number(this.reviewRenderLimit || pageSize)) return false;
+    this.reviewRenderLimit = nextLimit;
+    this.renderReview({ preserveScroll: true });
+    return true;
+  }
+
+  maybeExtendReviewList() {
+    const list = this.shadowRoot?.getElementById("reviewList");
+    if (!list) return;
+    this.reviewScrollTop = list.scrollTop;
+    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (remaining < 180) this.showMoreReviewSamples();
+  }
+
+  ensureReviewIndexVisible(index) {
+    const pageSize = Math.max(1, Number(this.reviewPageSize || 40));
+    const needed = index + 1;
+    if (needed > Number(this.reviewRenderLimit || pageSize)) {
+      this.reviewRenderLimit = Math.min(this.reviewFilteredSamples().length, Math.ceil(needed / pageSize) * pageSize);
+    }
+  }
+
+  scrollPlayingReviewSampleIntoView() {
+    if (!this.reviewPlayingSampleId) return;
+    const selector = `[data-sample-id="${this.cssEscape(this.reviewPlayingSampleId)}"]`;
+    const node = this.shadowRoot?.querySelector(selector);
+    node?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    const list = this.shadowRoot?.getElementById("reviewList");
+    if (list) this.reviewScrollTop = list.scrollTop;
   }
 
   async toggleReviewPlaylist() {
@@ -427,50 +508,75 @@ class WakewordCollectionCard extends HTMLElement {
   }
 
   async playReviewSample(index, continuePlaylist = false) {
+    this.ensureReviewIndexVisible(index);
     const samples = this.reviewVisibleSamples();
     if (!samples[index]) return;
     clearTimeout(this.reviewTimer);
     this.reviewAudio = this.reviewAudio || new Audio();
     this.reviewAudio.onended = () => {
+      const endedId = this.reviewPlayingSampleId;
       this.reviewPlaying = false;
-      this.renderReview();
+      this.reviewPlayingSampleId = "";
+      this.renderReview({ preserveScroll: true });
       if (continuePlaylist) {
+        this.reviewIndex = index + 1;
         this.reviewTimer = setTimeout(() => this.playReviewSample(index + 1, true), 500);
+      } else if (endedId) {
+        this.reviewScrollTop = this.shadowRoot?.getElementById("reviewList")?.scrollTop || this.reviewScrollTop || 0;
       }
     };
     this.reviewAudio.onerror = () => {
       this.reviewPlaying = false;
-      this.renderReview();
+      this.reviewPlayingSampleId = "";
+      this.renderReview({ preserveScroll: true });
       if (continuePlaylist) {
         this.reviewTimer = setTimeout(() => this.playReviewSample(index + 1, true), 500);
       }
     };
     this.reviewIndex = index;
     this.reviewPlaying = true;
+    this.reviewPlayingSampleId = samples[index].id;
+    this.markReviewSamplePlayed(samples[index]);
     this.reviewAudio.src = samples[index].url;
     this.reviewAudio.currentTime = 0;
-    this.renderReview();
+    this.renderReview({ preserveScroll: true, scrollToPlaying: true });
     try {
       await this.reviewAudio.play();
     } catch (error) {
       this.reviewPlaying = false;
+      this.reviewPlayingSampleId = "";
       this.reviewError = error?.message || String(error);
-      this.renderReview();
+      this.renderReview({ preserveScroll: true });
     }
   }
 
   pauseReviewPlaylist() {
     clearTimeout(this.reviewTimer);
     this.reviewPlaying = false;
+    this.reviewPlayingSampleId = "";
     this.reviewAudio?.pause();
-    this.renderReview();
+    this.renderReview({ preserveScroll: true });
   }
 
   async reviewCandidateAction(action, sampleId) {
     const sample = (this.reviewSamples || []).find((item) => item.id === sampleId);
     if (!sample || sample.busy) return;
+    const previous = {
+      reviewStatus: sample.reviewStatus,
+      confirmedForTraining: sample.confirmedForTraining,
+      negativeAdded: sample.negativeAdded,
+    };
     sample.busy = true;
-    this.renderReview();
+    if (action === "negative") {
+      sample.reviewStatus = "negative";
+      sample.confirmedForTraining = false;
+      sample.negativeAdded = true;
+    } else if (action === "confirm") {
+      sample.reviewStatus = "confirmed";
+      sample.confirmedForTraining = true;
+      sample.negativeAdded = false;
+    }
+    this.renderReview({ preserveScroll: true });
     try {
       const service = action === "confirm" ? "wakeword_review_candidate_confirm" : "wakeword_review_candidate_negative";
       await this.call("shell_command", service, { sample_id: sample.id });
@@ -479,12 +585,18 @@ class WakewordCollectionCard extends HTMLElement {
       sample.negativeAdded = action === "negative";
       await this.loadReviewStatuses(true);
       this.playSound(action === "confirm" ? "success" : "click");
+      if (action === "negative" && !this.reviewFilterAllows(sample)) {
+        this.pauseReviewPlaylist();
+      }
     } catch (error) {
+      sample.reviewStatus = previous.reviewStatus;
+      sample.confirmedForTraining = previous.confirmedForTraining;
+      sample.negativeAdded = previous.negativeAdded;
       this.reviewError = error?.message || String(error);
       this.playSound("warn");
     } finally {
       sample.busy = false;
-      this.renderReview();
+      this.renderReview({ preserveScroll: true });
     }
   }
 
@@ -820,6 +932,26 @@ class WakewordCollectionCard extends HTMLElement {
           flex-wrap: wrap;
           gap: 8px;
           justify-content: flex-end;
+          align-items: center;
+        }
+        .review-filter {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          min-height: 40px;
+          color: var(--ww-muted);
+          font-size: 12px;
+          font-weight: 850;
+        }
+        .review-filter select {
+          min-height: 40px;
+          border: 1px solid var(--ww-line);
+          border-radius: 7px;
+          padding: 0 10px;
+          background: rgba(255, 255, 255, 0.82);
+          color: var(--ww-ink);
+          font: inherit;
+          font-weight: 800;
         }
         .review-list {
           display: grid;
@@ -846,6 +978,9 @@ class WakewordCollectionCard extends HTMLElement {
         .sample.playing {
           border-color: rgba(20, 124, 140, 0.62);
           box-shadow: inset 3px 0 0 var(--ww-teal);
+        }
+        .sample.played:not(.playing) {
+          background: rgba(255, 255, 255, 0.58);
         }
         .sample.confirmed {
           border-color: rgba(15, 143, 100, 0.60);
@@ -911,6 +1046,16 @@ class WakewordCollectionCard extends HTMLElement {
           color: var(--ww-muted);
           border-color: rgba(104, 115, 133, 0.34);
           background: rgba(104, 115, 133, 0.12);
+        }
+        .badge.played {
+          color: var(--ww-teal);
+          border-color: rgba(20, 124, 140, 0.32);
+          background: rgba(20, 124, 140, 0.10);
+        }
+        .badge.unplayed {
+          color: var(--ww-ink);
+          border-color: rgba(22, 30, 46, 0.18);
+          background: rgba(232, 237, 243, 0.76);
         }
         .icon-btn {
           width: 40px;
@@ -1199,9 +1344,18 @@ class WakewordCollectionCard extends HTMLElement {
                 <div class="subtitle" id="reviewSubtitle"></div>
               </div>
               <div class="review-actions">
+                <label class="review-filter">Фильтр
+                  <select id="reviewFilterSelect">
+                    <option value="hide_negative">без отклоненных</option>
+                    <option value="pending">только новые</option>
+                    <option value="missed">missed by model</option>
+                    <option value="confirmed">подтвержденные</option>
+                    <option value="negative">noise negatives</option>
+                    <option value="all">все</option>
+                  </select>
+                </label>
                 <button id="reviewPlaylistBtn"><ha-icon icon="mdi:play"></ha-icon>Play</button>
                 <button id="reviewRefreshBtn"><ha-icon icon="mdi:refresh"></ha-icon>Refresh</button>
-                <button id="reviewMoreBtn"><ha-icon icon="mdi:chevron-down"></ha-icon>Еще</button>
               </div>
             </div>
             <div id="reviewBody"></div>
@@ -1246,7 +1400,7 @@ class WakewordCollectionCard extends HTMLElement {
     $("applyStep").addEventListener("click", () => this.applyStep(WAKEWORD_PLAN[this.currentPlanIndex()]));
     $("reviewPlaylistBtn").addEventListener("click", () => this.toggleReviewPlaylist());
     $("reviewRefreshBtn").addEventListener("click", () => this.loadReviewManifest(true));
-    $("reviewMoreBtn").addEventListener("click", () => this.showMoreReviewSamples());
+    $("reviewFilterSelect").addEventListener("change", (event) => this.setReviewFilter(event.target.value));
   }
 
   currentPlanIndex() {
@@ -1280,24 +1434,31 @@ class WakewordCollectionCard extends HTMLElement {
     });
   }
 
-  renderReview() {
+  renderReview(options = {}) {
     if (!this.shadowRoot) return;
+    const previousList = this.shadowRoot.getElementById("reviewList");
+    const previousScroll = options.preserveScroll
+      ? previousList?.scrollTop ?? this.reviewScrollTop ?? 0
+      : 0;
     const body = this.shadowRoot.getElementById("reviewBody");
     const subtitle = this.shadowRoot.getElementById("reviewSubtitle");
     const playlistBtn = this.shadowRoot.getElementById("reviewPlaylistBtn");
-    const moreBtn = this.shadowRoot.getElementById("reviewMoreBtn");
-    if (!body || !subtitle || !playlistBtn || !moreBtn) return;
+    const filterSelect = this.shadowRoot.getElementById("reviewFilterSelect");
+    if (!body || !subtitle || !playlistBtn) return;
 
     const allSamples = this.reviewSamples || [];
+    const filteredSamples = this.reviewFilteredSamples();
     const samples = this.reviewVisibleSamples();
     const missedCount = allSamples.filter((sample) => sample.missedByModel).length;
     const confirmedCount = allSamples.filter((sample) => sample.confirmedForTraining).length;
     const negativeCount = allSamples.filter((sample) => sample.negativeAdded).length;
     subtitle.textContent = this.reviewLoading
       ? "Загружаю manifest кандидатов..."
-      : `Показано ${samples.length}/${allSamples.length}, новые сверху. ${missedCount} не распознаны моделью, ${confirmedCount} подтверждены, ${negativeCount} добавлены в шумовые negatives.`;
+      : `Показано ${samples.length}/${filteredSamples.length} по фильтру, всего ${allSamples.length}. Новые сверху. ${missedCount} не распознаны моделью, ${confirmedCount} подтверждены, ${negativeCount} добавлены в шумовые negatives.`;
     playlistBtn.disabled = !samples.length;
-    moreBtn.disabled = samples.length >= allSamples.length;
+    if (filterSelect && filterSelect.value !== this.currentReviewFilter()) {
+      filterSelect.value = this.currentReviewFilter();
+    }
     playlistBtn.innerHTML =
       `<ha-icon icon="${this.reviewPlaying ? "mdi:pause" : "mdi:play"}"></ha-icon>${this.reviewPlaying ? "Pause" : "Play"}`;
 
@@ -1308,16 +1469,25 @@ class WakewordCollectionCard extends HTMLElement {
     if (!samples.length) {
       const details = this.reviewError
         ? `Manifest недоступен (${this.reviewError}).`
-        : "Manifest пока отсутствует или в нем нет кандидатов.";
-      body.innerHTML = `<div class="empty">${this.escape(details)} Когда другой агент создаст JSON со списком samples, они появятся здесь автоматически после Refresh.</div>`;
+        : allSamples.length
+          ? "По текущему фильтру кандидатов нет."
+          : "Manifest пока отсутствует или в нем нет кандидатов.";
+      body.innerHTML = `<div class="empty">${this.escape(details)} Новые samples появятся здесь автоматически после Refresh.</div>`;
       return;
     }
 
     body.innerHTML = `
-      <div class="review-list">
+      <div class="review-list" id="reviewList">
         ${samples.map((sample, index) => this.renderReviewSample(sample, index)).join("")}
       </div>
     `;
+    const list = body.querySelector("#reviewList");
+    if (list) {
+      const maxScroll = Math.max(0, list.scrollHeight - list.clientHeight);
+      list.scrollTop = Math.min(previousScroll, maxScroll);
+      this.reviewScrollTop = list.scrollTop;
+      list.addEventListener("scroll", () => this.maybeExtendReviewList(), { passive: true });
+    }
     body.querySelectorAll("[data-review-play]").forEach((button) => {
       button.addEventListener("click", () => this.playReviewSample(Number(button.dataset.reviewPlay), false));
     });
@@ -1327,6 +1497,9 @@ class WakewordCollectionCard extends HTMLElement {
     body.querySelectorAll("[data-review-negative]").forEach((button) => {
       button.addEventListener("click", () => this.addReviewSampleToNegative(button.dataset.reviewNegative));
     });
+    if (options.scrollToPlaying) {
+      window.requestAnimationFrame(() => this.scrollPlayingReviewSampleIntoView());
+    }
   }
 
   renderReviewSample(sample, index) {
@@ -1344,8 +1517,11 @@ class WakewordCollectionCard extends HTMLElement {
       : sample.detectedByModel === true
         ? `<span class="badge detected">detected</span>`
         : `<span class="badge">not detected</span>`;
+    const playedBadge = sample.played
+      ? `<span class="badge played">прослушано</span>`
+      : `<span class="badge unplayed">не слушали</span>`;
     return `
-      <div class="sample ${sample.missedByModel ? "missed" : ""} ${playing ? "playing" : ""} ${sample.confirmedForTraining ? "confirmed" : ""} ${sample.negativeAdded ? "negative" : ""}">
+      <div class="sample ${sample.missedByModel ? "missed" : ""} ${playing ? "playing" : ""} ${sample.played ? "played" : ""} ${sample.confirmedForTraining ? "confirmed" : ""} ${sample.negativeAdded ? "negative" : ""}" data-sample-id="${this.escape(sample.id)}">
         <button class="icon-btn" title="Play sample" data-review-play="${index}">
           <ha-icon icon="${playing ? "mdi:volume-high" : "mdi:play"}"></ha-icon>
         </button>
@@ -1355,6 +1531,7 @@ class WakewordCollectionCard extends HTMLElement {
             ${detectedBadge}
             ${statusBadge}
             ${trainingBadge}
+            ${playedBadge}
             <span class="badge">${this.escape(duration)}</span>
             <span class="badge">score ${this.escape(score)}</span>
             <span class="badge">${this.escape(sample.whenLabel)}</span>
@@ -1473,11 +1650,10 @@ class WakewordCollectionCard extends HTMLElement {
   updateDirection(location) {
     const entityId = this.directionEntityId();
     const levelEntity = this.levelEntityId();
-    const raw = this.value(entityId, "");
-    const fallbackDirection = this.attr(levelEntity, "direction_degrees", "");
-    const numeric = raw === "" ? Number(fallbackDirection) : Number(raw);
-    const confidence = Number(this.attr(entityId, "confidence", this.attr(levelEntity, "confidence", NaN)));
-    const age = Number(this.attr(entityId, "age_seconds", this.attr(levelEntity, "age_seconds", NaN)));
+    const liveDirection = this.attr(levelEntity, "direction_degrees", this.value(entityId, ""));
+    const numeric = Number(liveDirection);
+    const confidence = Number(this.attr(levelEntity, "confidence", this.attr(entityId, "confidence", NaN)));
+    const age = Number(this.attr(levelEntity, "age_seconds", this.attr(entityId, "age_seconds", NaN)));
     const point = ROOM_POINTS.find((item) => item.id === location);
     const needle = this.shadowRoot.getElementById("needle");
     const text = this.shadowRoot.getElementById("directionText");
@@ -1485,11 +1661,11 @@ class WakewordCollectionCard extends HTMLElement {
       needle.style.transform = `translate(-50%, -100%) rotate(${numeric}deg)`;
       const confidenceText = Number.isFinite(confidence) ? `, уверенность ${Math.round(confidence * 100)}%` : "";
       const ageText = Number.isFinite(age) ? `, обновлено ${Math.round(age)} c назад` : "";
-      text.textContent = `Направление от ReSpeaker массива: ${Math.round(numeric)} градусов${confidenceText}${ageText}. Выбранная позиция: ${LABELS.location[location] || location}.`;
+      text.textContent = `Фактическое направление ReSpeaker: ${Math.round(numeric)} градусов${confidenceText}${ageText}. Выбранная позиция записи: ${LABELS.location[location] || location}.`;
     } else {
       const angle = point ? Math.atan2(point.y - 50, point.x - 50) * 180 / Math.PI + 90 : 0;
       needle.style.transform = `translate(-50%, -100%) rotate(${angle}deg)`;
-      text.textContent = `ReSpeaker direction sensor ждет данные. Стрелка показывает выбранную позицию записи: ${LABELS.location[location] || location}.`;
+      text.textContent = `Фактическое направление ReSpeaker пока недоступно. Стрелка показывает выбранную позицию записи: ${LABELS.location[location] || location}.`;
     }
   }
 
@@ -1499,8 +1675,9 @@ class WakewordCollectionCard extends HTMLElement {
     const directionEntity = this.directionEntityId();
     const rawDb = this.value(levelEntity, "");
     const db = rawDb === "" ? NaN : Number(rawDb);
-    const confidence = Number(this.attr(directionEntity, "confidence", this.attr(levelEntity, "confidence", NaN)));
-    const age = Number(this.attr(directionEntity, "age_seconds", this.attr(levelEntity, "age_seconds", NaN)));
+    const liveDirection = Number(this.attr(levelEntity, "direction_degrees", this.value(directionEntity, "")));
+    const confidence = Number(this.attr(levelEntity, "confidence", this.attr(directionEntity, "confidence", NaN)));
+    const age = Number(this.attr(levelEntity, "age_seconds", this.attr(directionEntity, "age_seconds", NaN)));
     const level = Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 70) / 55)) : 0;
     const micFill = this.shadowRoot.getElementById("micFill");
     const micText = this.shadowRoot.getElementById("micText");
@@ -1508,9 +1685,10 @@ class WakewordCollectionCard extends HTMLElement {
     micFill.style.width = `${Math.round(level * 100)}%`;
     if (Number.isFinite(db)) {
       const hint = db > -18 ? "громко" : db > -34 ? "хороший уровень" : db > -52 ? "тихо" : "почти тишина";
+      const directionText = Number.isFinite(liveDirection) ? ` Фактическое направление ${Math.round(liveDirection)} градусов.` : " Фактическое направление пока недоступно.";
       const confidenceText = Number.isFinite(confidence) ? ` Direction confidence ${Math.round(confidence * 100)}%.` : "";
       const ageText = Number.isFinite(age) ? ` Обновлено ${Math.round(age)} c назад.` : "";
-      micText.textContent = `ReSpeaker массив: ${Math.round(db)} dBFS, ${hint}.${confidenceText}${ageText}`;
+      micText.textContent = `ReSpeaker массив: ${Math.round(db)} dBFS, ${hint}.${directionText}${confidenceText}${ageText}`;
     } else {
       micText.textContent = "ReSpeaker monitor ждет live данные от Wyoming capture pipeline.";
     }
@@ -1527,6 +1705,12 @@ class WakewordCollectionCard extends HTMLElement {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  cssEscape(value) {
+    const text = String(value || "");
+    if (window.CSS?.escape) return window.CSS.escape(text);
+    return text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   }
 }
 
