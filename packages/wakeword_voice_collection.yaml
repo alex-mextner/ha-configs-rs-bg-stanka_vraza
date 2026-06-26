@@ -155,7 +155,6 @@ command_line:
       unique_id: wakeword_mic_direction
       command: "python3 /config/scripts/wakeword_array_status.py --status-file /config/oww-dataset/wakeword_array_status.json json"
       scan_interval: 1
-      unit_of_measurement: "°"
       value_template: >-
         {% if value_json.state == 'ok' and value_json.direction_degrees is not none %}
           {{ value_json.direction_degrees }}
@@ -177,7 +176,6 @@ command_line:
       unique_id: wakeword_mic_level
       command: "python3 /config/scripts/wakeword_array_status.py --status-file /config/oww-dataset/wakeword_array_status.json json"
       scan_interval: 1
-      unit_of_measurement: "dBFS"
       value_template: >-
         {% if value_json.state == 'ok' and value_json.level_dbfs is not none %}
           {{ value_json.level_dbfs }}
