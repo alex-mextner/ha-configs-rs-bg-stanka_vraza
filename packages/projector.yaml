@@ -38,15 +38,24 @@ script:
       - action: input_boolean.turn_off
         target: { entity_id: input_boolean.projector_power }
 
+  projector_toggle:
+    alias: Projector toggle
+    mode: single
+    sequence:
+      - choose:
+          - conditions: "{{ is_state('input_boolean.projector_power', 'on') }}"
+            sequence:
+              - action: script.projector_turn_off
+        default:
+          - action: script.projector_turn_on
+
 automation:
-  # Projector power drives the active source. Turning the projector on makes
-  # it the active source (input_text.tv_source = projector); turning it off
-  # falls back to chromecast — you were watching on the projector, so route
-  # the TV back to the Chromecast. Only reverts to chromecast if projector
-  # was actually the active source (don't hijack if it powered off in the
-  # background while you were on pc/chromecast). tv_source +
-  # source_to_chromecast live in the universal_remote package; HA merges
-  # packages so the cross-package references resolve.
+  # Projector power drives the PC display/Kodi helper and the active source.
+  # Turning the projector on wakes/unlocks the desktop and starts Kodi, then
+  # marks the source as projector. Turning it off stops Kodi and locks the
+  # desktop. Only reverts TV source to chromecast if projector was actually
+  # active, so a background power correction does not hijack pc/chromecast.
+  # tv_source + source_to_chromecast live in universal_remote; packages merge.
   - alias: Projector power follows source
     id: projector_power_follows_source
     mode: queued
@@ -65,14 +74,16 @@ automation:
       - choose:
           - conditions: "{{ trigger.id == 'on' }}"
             sequence:
+              - action: rest_command.host_projector_on
               - action: input_text.set_value
                 target: { entity_id: input_text.tv_source }
                 data: { value: projector }
-          - conditions: >-
-              {{ trigger.id == 'off' and
-                 is_state('input_text.tv_source', 'projector') }}
+          - conditions: "{{ trigger.id == 'off' }}"
             sequence:
-              - action: script.source_to_chromecast
+              - action: rest_command.host_projector_off
+              - if: "{{ is_state('input_text.tv_source', 'projector') }}"
+                then:
+                  - action: script.source_to_chromecast
 
 media_player:
   # Commands-only universal player (no children) — state comes from the
@@ -88,6 +99,8 @@ media_player:
         action: script.projector_turn_on
       turn_off:
         action: script.projector_turn_off
+      toggle:
+        action: script.projector_toggle
       volume_up:
         action: button.press
         target: { entity_id: button.projector_vol_up }
