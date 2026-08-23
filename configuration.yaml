@@ -117,12 +117,6 @@ yandex_station:
 
 logger:
   default: info
-  logs:
-    bellows: debug
-    bellows.ezsp: debug
-    zigpy: debug
-    zigpy.zdo: debug
-    zha: debug
 
 homeassistant:
   internal_url: "http://192.168.0.39:8123"
