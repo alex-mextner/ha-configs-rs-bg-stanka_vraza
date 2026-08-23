@@ -1,0 +1,74 @@
+# Host action bridge running as the desktop user on 172.20.0.1:8787.
+
+rest_command:
+  host_projector_on:
+    url: !secret host_projector_on_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    timeout: 12
+
+  host_projector_off:
+    url: !secret host_projector_off_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    timeout: 12
+
+  host_kodi_start:
+    url: !secret host_kodi_start_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    timeout: 12
+
+  host_kodi_stop:
+    url: !secret host_kodi_stop_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    timeout: 12
+
+  host_kodi_play_path:
+    url: !secret host_kodi_play_path_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"path": {{ path | to_json }}, "media_type": {{ media_type | to_json }}, "id": {{ id | default('', true) | to_json }}, "name": {{ name | default('', true) | to_json }}}
+    timeout: 35
+
+  host_kodi_sync_library:
+    url: !secret host_kodi_sync_library_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"scan": {{ scan | default(true, true) | to_json }}, "start_kodi": {{ start_kodi | default(false, true) | to_json }}}
+    timeout: 45
+
+  host_screen_unlock:
+    url: !secret host_screen_unlock_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    timeout: 8
+
+  host_screen_lock:
+    url: !secret host_screen_lock_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    timeout: 8
+
+command_line:
+  - binary_sensor:
+      name: Host action bridge
+      unique_id: host_action_bridge
+      command: !secret host_actions_health_command
+      scan_interval: 60
+      payload_on: "ON"
+      payload_off: "OFF"
+      device_class: connectivity
