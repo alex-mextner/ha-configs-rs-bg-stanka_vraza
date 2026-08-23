@@ -1,0 +1,115 @@
+title: Torrents
+views:
+  - title: Overview
+    path: overview
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: button
+            name: Transmission Web UI
+            icon: mdi:web
+            tap_action:
+              action: navigate
+              navigation_path: /transmission
+
+          - type: custom:transmission-torrents-card
+            entry_id: 01KVG98KSDY89B6XZBTXCGA56V
+            total_entity: sensor.transmission_total_torrents
+            status_entity: sensor.transmission_status
+            download_speed_entity: sensor.transmission_download_speed
+            upload_speed_entity: sensor.transmission_upload_speed
+            error_entity: sensor.transmission_torrent_errors
+            play_service: script.transmission_play_torrent
+            refresh_interval: 15000
+
+          - type: entities
+            title: Transmission
+            entities:
+              - entity: sensor.transmission_status
+                name: Daemon
+              - entity: sensor.transmission_download_speed
+                name: Download
+              - entity: sensor.transmission_upload_speed
+                name: Upload
+              - entity: sensor.transmission_active_torrents
+                name: Active
+              - entity: sensor.transmission_started_torrents
+                name: Started
+              - entity: sensor.transmission_completed_torrents
+                name: Completed
+              - entity: sensor.transmission_paused_torrents
+                name: Paused
+              - entity: sensor.transmission_total_torrents
+                name: Total
+              - entity: sensor.transmission_torrent_errors
+                name: Errors
+              - entity: switch.transmission_switch
+                name: All torrents
+              - entity: switch.transmission_turtle_mode
+                name: Turtle mode
+              - entity: binary_sensor.host_action_bridge
+                name: Host bridge
+            show_header_toggle: false
+
+          - type: history-graph
+            title: Current Speed History
+            entities:
+              - entity: sensor.transmission_download_speed
+                name: Download
+              - entity: sensor.transmission_upload_speed
+                name: Upload
+            hours_to_show: 24
+            refresh_interval: 0
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: RuTracker.org Login
+            entities:
+              - entity: input_text.rutracker_username
+                name: Username
+              - entity: input_text.rutracker_password
+                name: Password
+              - entity: input_select.rutracker_login_method
+                name: Method
+              - entity: script.rutracker_login_from_input
+                name: Login
+            show_header_toggle: false
+
+          - type: custom:rutracker-search-card
+            query_entity: input_text.rutracker_search_query
+            media_type_entity: input_select.rutracker_media_type
+            default_media_type: series
+            max_results: 8
+            verify_mode: transmission
+            verify_limit: 5
+            verify_timeout: 25
+            min_seeders: 1
+
+          - type: custom:rutracker-results-card
+            entity: sensor.ruttracker_search_results
+            select_entity: select.rutracker_org_search_result
+            result_input: input_text.rutracker_result_id
+            add_service: rutracker_transmission.add
+            download_path_entity: input_text.transmission_download_path
+            labels_entity: input_text.transmission_labels
+
+          - type: custom:transmission-add-card
+            torrent_entity: input_text.transmission_torrent
+            labels_entity: input_text.transmission_labels
+            download_path_entity: input_text.transmission_download_path
+            default_download_path: /home/ultra/Downloads
+
+          - type: markdown
+            title: Recent Downloads
+            content: >-
+              {% set downloads = state_attr('sensor.transmission_recent_downloads', 'downloads') or [] %}
+              {% if downloads | length == 0 %}
+              No completed downloads recorded yet.
+              {% else %}
+              | Name | Time |
+              |:--|--:|
+              {% for item in downloads %}
+              | {{ item.name | truncate(50) }} | {{ item.time | as_datetime | as_local }} |
+              {% endfor %}
+              {% endif %}

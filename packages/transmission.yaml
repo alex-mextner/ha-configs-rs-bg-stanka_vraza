@@ -1,0 +1,533 @@
+input_text:
+  transmission_torrent:
+    name: Transmission torrent URL
+    icon: mdi:magnet
+    max: 255
+  transmission_labels:
+    name: Transmission labels
+    icon: mdi:label
+    max: 255
+    initial: ""
+  transmission_download_path:
+    name: Transmission download path
+    icon: mdi:folder-download
+    max: 255
+    initial: /home/ultra/Downloads
+  rutracker_search_query:
+    name: RuTracker.org search query
+    icon: mdi:movie-search
+    max: 255
+  rutracker_result_id:
+    name: RuTracker.org result id
+    icon: mdi:identifier
+    max: 80
+  rutracker_username:
+    name: RuTracker.org username
+    icon: mdi:account
+    max: 255
+  rutracker_password:
+    name: RuTracker.org password
+    icon: mdi:lock
+    max: 255
+    mode: password
+
+input_select:
+  rutracker_media_type:
+    name: RuTracker.org media type
+    icon: mdi:movie-open
+    options:
+      - series
+      - movies
+      - both
+    initial: series
+  rutracker_login_method:
+    name: RuTracker.org login method
+    icon: mdi:web
+    options:
+      - auto
+      - http
+      - browser
+    initial: auto
+
+command_line:
+  - sensor:
+      name: Transmission torrent errors
+      unique_id: transmission_torrent_errors
+      command: "python3 /config/scripts/transmission_errors.py"
+      scan_interval: 30
+      value_template: "{{ value_json.count }}"
+      json_attributes:
+        - errors
+        - torrents
+        - probe_error
+
+script:
+  transmission_add_torrent:
+    alias: Transmission add torrent
+    icon: mdi:download
+    mode: queued
+    fields:
+      torrent:
+        description: Magnet link, HTTP URL, or allowed local torrent path.
+        example: magnet:?xt=urn:btih:...
+      labels:
+        description: Optional comma-separated labels.
+        example: Movies,Auto
+      download_path:
+        description: Optional download directory.
+        example: /home/ultra/Downloads
+    sequence:
+      - variables:
+          entry_id: "01KVG98KSDY89B6XZBTXCGA56V"
+          torrent_value: "{{ torrent | default('', true) | trim }}"
+          raw_labels_value: "{{ labels | default('', true) | trim }}"
+          labels_value: >-
+            {% set value = raw_labels_value %}
+            {{ '' if value in ['unknown', 'unavailable', 'none', 'None'] else value }}
+          raw_path_value: "{{ download_path | default('', true) | trim }}"
+          path_value: >-
+            {% set value = raw_path_value %}
+            {{ value if value.startswith('/') else '' }}
+          path_is_absolute: "{{ path_value | length > 0 }}"
+      - condition: template
+        value_template: "{{ torrent_value | length > 0 }}"
+      - choose:
+          - conditions: "{{ labels_value | length > 0 and path_is_absolute }}"
+            sequence:
+              - action: transmission.add_torrent
+                data:
+                  entry_id: "{{ entry_id }}"
+                  torrent: "{{ torrent_value }}"
+                  labels: "{{ labels_value }}"
+                  download_path: "{{ path_value }}"
+          - conditions: "{{ labels_value | length > 0 }}"
+            sequence:
+              - action: transmission.add_torrent
+                data:
+                  entry_id: "{{ entry_id }}"
+                  torrent: "{{ torrent_value }}"
+                  labels: "{{ labels_value }}"
+          - conditions: "{{ path_is_absolute }}"
+            sequence:
+              - action: transmission.add_torrent
+                data:
+                  entry_id: "{{ entry_id }}"
+                  torrent: "{{ torrent_value }}"
+                  download_path: "{{ path_value }}"
+        default:
+          - action: transmission.add_torrent
+            data:
+              entry_id: "{{ entry_id }}"
+              torrent: "{{ torrent_value }}"
+
+  transmission_add_from_input:
+    alias: Transmission add from input
+    icon: mdi:download-box
+    mode: single
+    sequence:
+      - variables:
+          torrent_value: "{{ states('input_text.transmission_torrent') | trim }}"
+          torrent_lower: "{{ states('input_text.transmission_torrent') | trim | lower }}"
+          raw_labels_value: "{{ states('input_text.transmission_labels') | trim }}"
+          labels_value: >-
+            {% set value = raw_labels_value %}
+            {{ '' if value in ['unknown', 'unavailable', 'none', 'None'] else value }}
+          raw_path_value: "{{ states('input_text.transmission_download_path') | trim }}"
+          path_value: >-
+            {% set value = raw_path_value %}
+            {{ value if value.startswith('/') else '' }}
+          is_rutracker_topic: >-
+            {{ 'rutracker.org/forum/' in torrent_lower
+               and ('viewtopic.php' in torrent_lower or 'dl.php' in torrent_lower)
+               and 't=' in torrent_lower }}
+      - condition: template
+        value_template: "{{ torrent_value | length > 0 }}"
+      - choose:
+          - conditions: "{{ is_rutracker_topic }}"
+            sequence:
+              - action: rutracker_transmission.add
+                data:
+                  magnet: "{{ torrent_value }}"
+                  download_dir: "{{ path_value }}"
+                  labels: "{{ labels_value }}"
+                  paused: false
+                response_variable: add_response
+              - action: persistent_notification.create
+                data:
+                  title: RuTracker.org
+                  message: >-
+                    {% if add_response.ok %}
+                    Added {{ add_response.title | default(add_response.topic_id, true) }} to Transmission.
+                    {% else %}
+                    Failed: {{ add_response.error }}
+                    {% endif %}
+        default:
+          - action: script.transmission_add_torrent
+            data:
+              torrent: "{{ torrent_value }}"
+              labels: "{{ labels_value }}"
+              download_path: "{{ path_value }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.transmission_torrent
+        data:
+          value: ""
+
+  transmission_pause_all:
+    alias: Transmission pause all torrents
+    icon: mdi:pause
+    mode: single
+    sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.transmission_switch
+
+  transmission_resume_all:
+    alias: Transmission resume all torrents
+    icon: mdi:play
+    mode: single
+    sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.transmission_switch
+
+  transmission_turtle_mode_on:
+    alias: Transmission turtle mode on
+    icon: mdi:turtle
+    mode: single
+    sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.transmission_turtle_mode
+
+  transmission_turtle_mode_off:
+    alias: Transmission turtle mode off
+    icon: mdi:speedometer
+    mode: single
+    sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.transmission_turtle_mode
+
+  transmission_play_torrent:
+    alias: Transmission play torrent in Kodi
+    icon: mdi:kodi
+    mode: queued
+    fields:
+      id:
+        description: Transmission torrent id.
+        example: 11
+      name:
+        description: Transmission torrent name.
+        example: The.Big.Bang.Theory.1080p.BluRay.Rus.Eng.TeamHD
+      download_dir:
+        description: Transmission download directory.
+        example: /home/ultra/Downloads
+      media_type:
+        description: series, movies, or auto.
+        example: series
+    sequence:
+      - variables:
+          entry_id: "01KVG98KSDY89B6XZBTXCGA56V"
+          torrent_id: "{{ id | default('', true) | string }}"
+          requested_name: "{{ name | default('', true) | string }}"
+          requested_download_dir: "{{ download_dir | default('', true) | string }}"
+          requested_media_type: "{{ media_type | default('auto', true) | string }}"
+          torrent_name: "{{ requested_name }}"
+          resolved_download_dir: "{{ requested_download_dir }}"
+          torrent_path: >-
+            {% set base = requested_download_dir | trim %}
+            {% set title = requested_name | trim %}
+            {{ base.rstrip('/') ~ '/' ~ title if base and title else '' }}
+      - choose:
+          - conditions: "{{ torrent_path | length <= 1 }}"
+            sequence:
+              - action: transmission.get_torrents
+                data:
+                  entry_id: "{{ entry_id }}"
+                  torrent_filter: all
+                response_variable: torrents_response
+              - variables:
+                  torrent_name: >-
+                    {% set ns = namespace(value=requested_name) %}
+                    {% for item_name, item in (torrents_response.torrents | default({})).items() %}
+                      {% if (item.id | int(0)) == (torrent_id | int(0)) %}
+                        {% set ns.value = item.name | default(item_name) %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.value }}
+                  resolved_download_dir: >-
+                    {% set ns = namespace(value='') %}
+                    {% for item_name, item in (torrents_response.torrents | default({})).items() %}
+                      {% if (item.id | int(0)) == (torrent_id | int(0)) %}
+                        {% set ns.value = item.download_dir | default('') %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.value }}
+                  torrent_path: >-
+                    {% set base = resolved_download_dir | trim %}
+                    {% set title = torrent_name | trim %}
+                    {{ base.rstrip('/') ~ '/' ~ title if base and title else '' }}
+      - condition: template
+        value_template: "{{ torrent_path | length > 1 }}"
+      - action: script.source_to_projector
+      - action: rest_command.host_kodi_start
+        continue_on_error: true
+      - action: rest_command.host_kodi_sync_library
+        data:
+          scan: false
+          start_kodi: false
+        continue_on_error: true
+      - action: rest_command.host_kodi_play_path
+        data:
+          path: "{{ torrent_path }}"
+          id: "{{ torrent_id }}"
+          name: "{{ torrent_name }}"
+          media_type: "{{ requested_media_type }}"
+      - action: persistent_notification.create
+        data:
+          title: Kodi
+          message: >-
+            Sent {{ torrent_name }} to Kodi. Media type is detected from RuTracker/Transmission data and file names:
+            {{ torrent_path }}
+
+  rutracker_login_from_input:
+    alias: RuTracker.org login from input
+    icon: mdi:login
+    mode: single
+    sequence:
+      - action: rutracker_transmission.login
+        data:
+          username: "{{ states('input_text.rutracker_username') }}"
+          password: "{{ states('input_text.rutracker_password') }}"
+          method: "{{ states('input_select.rutracker_login_method') }}"
+        response_variable: login_response
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.rutracker_password
+        data:
+          value: ""
+      - action: persistent_notification.create
+        data:
+          title: RuTracker.org
+          message: >-
+            {% if login_response.ok %}
+            Login cookies saved via {{ login_response.method }}
+            ({{ login_response.cookies_count }} cookies).
+            {% else %}
+            Login failed: {{ login_response.error }}.
+            {% if login_response.attempts %}
+            Attempts: {{ login_response.attempts }}
+            {% endif %}
+            {% endif %}
+
+  rutracker_search_from_input:
+    alias: RuTracker.org search from input
+    icon: mdi:movie-search
+    mode: single
+    sequence:
+      - action: rutracker_transmission.search
+        data:
+          query: "{{ states('input_text.rutracker_search_query') }}"
+          media_type: "{{ states('input_select.rutracker_media_type') }}"
+          max_results: 8
+          verify_mode: transmission
+          verify_limit: 5
+          verify_timeout: 25
+          min_seeders: 1
+        response_variable: search_response
+      - action: persistent_notification.create
+        data:
+          title: RuTracker.org
+          message: >-
+            Found {{ search_response.results | count }} candidates for
+            "{{ search_response.query }}".
+
+  rutracker_add_selected:
+    alias: RuTracker.org add selected to Transmission
+    icon: mdi:download
+    mode: single
+    fields:
+      result_id:
+        description: Optional result id returned by the latest RuTracker.org search.
+        example: rt-6145884
+    sequence:
+      - variables:
+          selected_result_id: >-
+            {% set provided = result_id | default('', true) | trim %}
+            {% set from_sensor = state_attr('sensor.ruttracker_search_results', 'selected_result_id') | default('', true) | trim %}
+            {% set from_input = states('input_text.rutracker_result_id') | trim %}
+            {{ provided if provided else (from_sensor if from_sensor else from_input) }}
+          raw_download_dir: "{{ states('input_text.transmission_download_path') | trim }}"
+          download_dir_value: >-
+            {% set value = raw_download_dir %}
+            {{ value if value.startswith('/') else '' }}
+          raw_labels_value: "{{ states('input_text.transmission_labels') | trim }}"
+          labels_value: >-
+            {% set value = raw_labels_value %}
+            {{ '' if value in ['unknown', 'unavailable', 'none', 'None'] else value }}
+      - action: rutracker_transmission.add
+        data:
+          result_id: "{{ selected_result_id }}"
+          download_dir: "{{ download_dir_value }}"
+          labels: "{{ labels_value }}"
+          paused: false
+        response_variable: add_response
+      - action: persistent_notification.create
+        data:
+          title: RuTracker.org
+          message: >-
+            {% if add_response.ok %}
+            Added {{ add_response.title | default(add_response.topic_id, true) }} to Transmission.
+            {% else %}
+            Failed: {{ add_response.error }}
+            {% endif %}
+
+automation:
+  - id: transmission_torrent_event_notifications
+    alias: Transmission torrent event notifications
+    mode: queued
+    trigger:
+      - platform: event
+        event_type: transmission_started_torrent
+        id: started
+      - platform: event
+        event_type: transmission_downloaded_torrent
+        id: downloaded
+      - platform: event
+        event_type: transmission_removed_torrent
+        id: removed
+    action:
+      - variables:
+          torrent_name: "{{ trigger.event.data.name | default('torrent') }}"
+          torrent_path: "{{ trigger.event.data.download_path | default('') }}"
+          torrent_labels: "{{ trigger.event.data.labels | default([]) }}"
+          message: >-
+            {% if trigger.id == 'downloaded' -%}
+            Downloaded: {{ torrent_name }}{% if torrent_path %} to {{ torrent_path }}{% endif %}
+            {%- elif trigger.id == 'started' -%}
+            Started: {{ torrent_name }}
+            {%- else -%}
+            Removed: {{ torrent_name }}
+            {%- endif %}
+      - action: persistent_notification.create
+        data:
+          title: Transmission
+          message: "{{ message }}{% if torrent_labels %} | labels: {{ torrent_labels }}{% endif %}"
+      - action: notify.mobile_app_echowhiskey536
+        data:
+          title: Transmission
+          message: "{{ message }}"
+
+  - id: transmission_eta_forecast_after_start
+    alias: Transmission ETA forecast 5 minutes after start
+    mode: queued
+    trigger:
+      - platform: event
+        event_type: transmission_started_torrent
+    action:
+      - variables:
+          entry_id: "01KVG98KSDY89B6XZBTXCGA56V"
+          started_name: "{{ trigger.event.data.name | default('') }}"
+      - delay: "00:05:00"
+      - action: transmission.get_torrents
+        data:
+          entry_id: "{{ entry_id }}"
+          torrent_filter: all
+        response_variable: torrents_response
+      - variables:
+          torrent_name: >-
+            {% set ns = namespace(value='') %}
+            {% for item_name, item in (torrents_response.torrents | default({})).items() %}
+              {% if item_name == started_name or item.name | default('') == started_name %}
+                {% set ns.value = item.name | default(item_name) %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.value }}
+          torrent_percent: >-
+            {% set ns = namespace(value='') %}
+            {% for item_name, item in (torrents_response.torrents | default({})).items() %}
+              {% if item_name == started_name or item.name | default('') == started_name %}
+                {% set ns.value = item.percent_done | default('') %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.value }}
+          torrent_eta: >-
+            {% set ns = namespace(value='') %}
+            {% for item_name, item in (torrents_response.torrents | default({})).items() %}
+              {% if item_name == started_name or item.name | default('') == started_name %}
+                {% set ns.value = item.eta | default('') %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.value }}
+          torrent_status: >-
+            {% set ns = namespace(value='') %}
+            {% for item_name, item in (torrents_response.torrents | default({})).items() %}
+              {% if item_name == started_name or item.name | default('') == started_name %}
+                {% set ns.value = item.status | default('') %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.value }}
+          speed_now: "{{ states('sensor.transmission_download_speed') }} MB/s"
+          eta_text: >-
+            {% set eta = torrent_eta | trim %}
+            {{ eta if eta and eta not in ['None', 'none', 'null'] else 'ETA unavailable yet' }}
+          forecast_message: >-
+            {% if torrent_name %}
+            {{ torrent_name }}: {{ torrent_percent or '0%' }}, {{ eta_text }}, speed {{ speed_now }}, status {{ torrent_status or 'unknown' }}.
+            {% else %}
+            {{ started_name }} is no longer in Transmission after 5 minutes.
+            {% endif %}
+      - action: persistent_notification.create
+        data:
+          title: Transmission ETA
+          message: "{{ forecast_message }}"
+      - action: notify.mobile_app_echowhiskey536
+        data:
+          title: Transmission ETA
+          message: "{{ forecast_message }}"
+
+  - id: transmission_sync_completed_files_to_kodi
+    alias: Transmission sync completed files to Kodi
+    mode: single
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: event
+        event_type: transmission_downloaded_torrent
+      - platform: state
+        entity_id: media_player.home
+    condition:
+      - condition: template
+        value_template: >-
+          {{ trigger.platform != 'state'
+             or trigger.to_state is not none
+             and (trigger.from_state is none or trigger.from_state.state != trigger.to_state.state)
+             and trigger.to_state.state not in ['unknown', 'unavailable', 'off'] }}
+    action:
+      - action: rest_command.host_kodi_sync_library
+        data:
+          scan: true
+          start_kodi: false
+        continue_on_error: true
+
+template:
+  - trigger:
+      - platform: event
+        event_type: transmission_downloaded_torrent
+    sensor:
+      - name: Transmission recent downloads
+        unique_id: transmission_recent_downloads
+        state: "{{ now().isoformat() }}"
+        attributes:
+          downloads: >-
+            {% set current = this.attributes.get('downloads', []) if this is defined else [] %}
+            {% set new = [{
+              'name': trigger.event.data.name,
+              'path': trigger.event.data.download_path,
+              'labels': trigger.event.data.labels,
+              'time': now().isoformat()
+            }] %}
+            {{ (new + current)[:10] }}

@@ -47,6 +47,26 @@ ingress:
     url: http://music-assistant:8095
     work_mode: ingress
     ui_mode: normal
+  transmission:
+    require_admin: true
+    title: Transmission
+    icon: mdi:download-network
+    url: http://172.20.0.1:9091
+    index: /transmission/web/
+    work_mode: ingress
+    ui_mode: normal
+    static_token: 05ed74a62475c41b58cec6aa74d00f31c86e665498b7b8c1
+    rewrite:
+      - mode: body
+        path: .*/transmission/web/?$
+        name: text/html
+        match: 'src="./transmission-app.js"'
+        replace: 'src="./transmission-app.js?v=ha20260621b"'
+      - mode: body
+        path: .*/transmission-app\.js(\?.*)?$
+        name: application/javascript
+        match: '_Root:"\.\./rpc"'
+        replace: '_Root:"/api/ingress/t-05ed74a62475c41b58cec6aa74d00f31c86e665498b7b8c1/transmission/rpc"'
   k1_se_printer:
     require_admin: true
     title: K1 SE
@@ -115,6 +135,10 @@ yandex_station:
   domain: yandex.com
   ssl: false
 
+rutracker_transmission:
+  host_login_url: !secret rutracker_browser_login_url
+  host_actions_token: !secret host_actions_token
+
 logger:
   default: info
 
@@ -128,6 +152,10 @@ lovelace:
     - url: /local/wakeword/wakeword-collection-card.js?v=20260626a
       type: module
     - url: /webrtc/webrtc-camera.js?v=3.6.1
+      type: module
+    - url: /local/community/transmission-card/transmission-card.js?v=20260619
+      type: js
+    - url: /local/community/rutracker-results-card/rutracker-results-card.js?v=20260621d
       type: module
   dashboards:
     3d-printers:
@@ -148,3 +176,9 @@ lovelace:
       icon: mdi:account-voice
       show_in_sidebar: true
       filename: ui-wakeword-collection.yaml
+    torrent-dashboard:
+      mode: yaml
+      title: Torrents
+      icon: mdi:download-network
+      show_in_sidebar: true
+      filename: ui-transmission.yaml
