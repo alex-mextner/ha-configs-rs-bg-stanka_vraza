@@ -38,6 +38,7 @@ services:
 
   music-assistant:
     image: ghcr.io/music-assistant/server:latest
+    user: "1000:1000"
     volumes:
       - /home/ultra/music-assistant:/data
     ports:
@@ -92,6 +93,8 @@ services:
   duckdns:
     image: lscr.io/linuxserver/duckdns:latest
     environment:
+      - PUID=1000
+      - PGID=1000
       - SUBDOMAINS=stvrz
       - TOKEN=873f27fb-4c66-4e21-905e-54c73da27d83
     volumes:
@@ -120,6 +123,7 @@ services:
 
   wyoming-openwakeword:
     image: rhasspy/wyoming-openwakeword
+    user: "1000:1000"
     volumes:
       - /home/ultra/oww-models:/custom-models
     command:
@@ -140,6 +144,7 @@ services:
 
   wyoming-faster-whisper:
     image: wyoming-faster-whisper-cuda
+    user: "1000:1000"
     volumes:
       - /home/ultra/wyoming-data:/data
     command:
@@ -166,10 +171,11 @@ services:
 
   wyoming-satellite:
     image: lunyaadev/rhasspy-wyoming-satellite:latest
-    devices:
-      - /dev/snd:/dev/snd
+    user: "1000:1000"
     group_add:
       - audio
+    devices:
+      - /dev/snd:/dev/snd
     volumes:
       - /home/ultra/sounds:/app/sounds
       - /home/ultra/homeassistant/scripts/wakeword_capture_ch0_record.sh:/app/sounds/wakeword_capture_ch0_record.sh:ro
@@ -197,10 +203,12 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    volumes:
-      - /home/ultra/.ollama:/root/.ollama
+    user: "1000:1000"
     environment:
       - OLLAMA_KEEP_ALIVE=5m
+      - HOME=/home/ultra
+    volumes:
+      - /home/ultra/.ollama:/home/ultra/.ollama
     restart: unless-stopped
     deploy:
       resources:
@@ -214,6 +222,7 @@ services:
 
   code-server:
     image: codercom/code-server:latest
+    user: "1000:1000"
     environment:
       - PUID=1000
       - PGID=1000
@@ -230,6 +239,14 @@ services:
     restart: unless-stopped
     networks:
       - ha-net
+
+  avahi-reflector:
+    image: flungo/avahi
+    restart: unless-stopped
+    networks:
+      - ha-net
+    cap_add:
+      - NET_ADMIN
 
 networks:
   ha-net:
