@@ -1,5 +1,11 @@
 # Wake word real positive collection tooling.
 
+recorder:
+  exclude:
+    entities:
+      - sensor.wakeword_mic_direction
+      - sensor.wakeword_mic_level
+
 input_select:
   wakeword_collection_phrase:
     name: "Wakeword phrase"
