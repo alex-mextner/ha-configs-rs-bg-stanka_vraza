@@ -1,0 +1,10 @@
+{
+  "domain": "rutracker_transmission",
+  "name": "RuTracker.org Transmission",
+  "codeowners": [],
+  "dependencies": [],
+  "documentation": "https://rutracker.org/forum",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

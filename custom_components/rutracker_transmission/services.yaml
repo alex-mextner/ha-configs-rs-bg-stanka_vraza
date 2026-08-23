@@ -1,0 +1,125 @@
+login:
+  target:
+  fields:
+    username:
+      required: false
+      selector:
+        text:
+      name: Username
+      description: RuTracker.org username. If empty, RUTRACKER_USERNAME is read from /config/.env.
+    password:
+      required: false
+      selector:
+        text:
+          type: password
+      name: Password
+      description: RuTracker.org password. If empty, RUTRACKER_PASSWORD is read from /config/.env.
+    method:
+      default: auto
+      selector:
+        select:
+          options:
+            - auto
+            - http
+            - browser
+      name: Login method
+      description: Auto tries HTTP first, then host agent-browser fallback.
+
+search:
+  target:
+  fields:
+    query:
+      required: true
+      selector:
+        text:
+      name: Query
+      description: Series or movie title to search for.
+    media_type:
+      default: series
+      selector:
+        select:
+          options:
+            - series
+            - movies
+            - both
+      name: Media type
+    max_results:
+      default: 8
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box
+      name: Maximum results
+    verify_mode:
+      default: transmission
+      selector:
+        select:
+          options:
+            - quick
+            - transmission
+            - none
+      name: Verification mode
+    verify_limit:
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 20
+          mode: box
+      name: Transmission verification limit
+    verify_timeout:
+      default: 25
+      selector:
+        number:
+          min: 5
+          max: 180
+          unit_of_measurement: s
+          mode: box
+      name: Verification timeout
+    min_seeders:
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+      name: Minimum seeders
+    forums:
+      selector:
+        text:
+      name: Forum ids
+      description: Optional comma-separated RuTracker.org forum ids.
+
+add:
+  target:
+  fields:
+    result_id:
+      selector:
+        text:
+      name: Result id
+      description: Result id returned by rutracker_transmission.search.
+    topic_id:
+      selector:
+        text:
+      name: Topic id
+      description: RuTracker.org topic id. Used when result_id is not provided.
+    magnet:
+      selector:
+        text:
+      name: Magnet link
+      description: Direct magnet link. Used when result_id/topic_id are not provided.
+    download_dir:
+      selector:
+        text:
+      name: Download directory
+    labels:
+      selector:
+        text:
+      name: Labels
+      description: Optional comma-separated Transmission labels.
+    paused:
+      default: false
+      selector:
+        boolean:
+      name: Add paused
