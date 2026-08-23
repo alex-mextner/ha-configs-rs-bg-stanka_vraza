@@ -108,7 +108,7 @@ script:
             sequence:
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: "{{ kodi_map[direction] }}"
 
   # Media transport: play/prev/next for the active source.
@@ -141,15 +141,15 @@ script:
           - conditions: "{{ source in ['pc', 'projector'] and action == 'play_pause' }}"
             sequence:
               - action: media_player.media_play_pause
-                target: { entity_id: media_player.192_168_0_11 }
+                target: { entity_id: media_player.home }
           - conditions: "{{ source in ['pc', 'projector'] and action == 'previous' }}"
             sequence:
               - action: media_player.media_previous_track
-                target: { entity_id: media_player.192_168_0_11 }
+                target: { entity_id: media_player.home }
           - conditions: "{{ source in ['pc', 'projector'] and action == 'next' }}"
             sequence:
               - action: media_player.media_next_track
-                target: { entity_id: media_player.192_168_0_11 }
+                target: { entity_id: media_player.home }
 
   # Kodi: resume next episode of the last in-progress show.
   kodi_play_next_episode:
@@ -158,7 +158,7 @@ script:
     sequence:
       - action: kodi.call_method
         data:
-          entity_id: media_player.192_168_0_11
+          entity_id: media_player.home
           method: VideoLibrary.GetInProgressTVShows
           properties: ["title", "lastplayed"]
           sort:
@@ -172,7 +172,7 @@ script:
                   show_id: "{{ shows_resp.tvshows[0].tvshowid }}"
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: VideoLibrary.GetEpisodes
                   tvshowid: "{{ show_id }}"
                   properties: ["title", "playcount", "resume", "file", "season", "episode"]
@@ -191,13 +191,13 @@ script:
                     sequence:
                       - action: kodi.call_method
                         data:
-                          entity_id: media_player.192_168_0_11
+                          entity_id: media_player.home
                           method: Player.Open
                           item: { episodeid: "{{ next_ep.episodeid }}" }
         default:
           # No in-progress shows: fallback to resume, then open Kodi home.
           - action: media_player.media_play
-            target: { entity_id: media_player.192_168_0_11 }
+            target: { entity_id: media_player.home }
 
   # Switch HDMI source only if not already there.
   source_to_chromecast:
@@ -271,7 +271,7 @@ script:
             sequence:
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: Input.SendText
                   text: ""
                   done: true
@@ -322,12 +322,12 @@ script:
             sequence:
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: Input.ExecuteAction
                   action: backspace
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: Input.SendText
                   text: "{{ ' ' if (char | string) == 'space' else (char | string) }}"
                   done: false
@@ -335,7 +335,7 @@ script:
             sequence:
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: Input.SendText
                   text: "{{ ' ' if (char | string) == 'space' else (char | string) }}"
                   done: false
@@ -377,13 +377,13 @@ script:
               # Kodi: open the Search window, type the query, submit.
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: GUI.ActivateWindow
                   window: search
               - delay: "00:00:00.5"
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: Input.SendText
                   text: "{{ query }}"
                   done: true
@@ -405,7 +405,7 @@ script:
             sequence:
               - action: kodi.call_method
                 data:
-                  entity_id: media_player.192_168_0_11
+                  entity_id: media_player.home
                   method: Input.ExecuteAction
                   action: backspace
 
@@ -694,14 +694,17 @@ automation:
           - conditions: "{{ button == 'power' }}"
             sequence:
               - choose:
-                  # projector source → power the projector. media_player.toggle
-                  # picks turn_on (single press) or turn_off (double press
-                  # ~3s apart, the projector's OFF requirement) from assumed
-                  # state.
+                  # projector source → power the projector through explicit
+                  # scripts so the OFF path always sends the required double
+                  # power frame.
                   - conditions: "{{ states('input_text.tv_source') == 'projector' }}"
                     sequence:
-                      - action: media_player.toggle
-                        target: { entity_id: media_player.projector }
+                      - choose:
+                          - conditions: "{{ is_state('input_boolean.projector_power', 'on') }}"
+                            sequence:
+                              - action: script.projector_turn_off
+                        default:
+                          - action: script.projector_turn_on
                 default:
                   - action: button.press
                     target: { entity_id: button.samsung_tv_power }
@@ -816,7 +819,7 @@ automation:
                     sequence:
                       - action: kodi.call_method
                         data:
-                          entity_id: media_player.192_168_0_11
+                          entity_id: media_player.home
                           method: Input.ContextMenu
                 default:
                   - action: system_log.write
@@ -857,7 +860,7 @@ automation:
                     sequence:
                       - action: kodi.call_method
                         data:
-                          entity_id: media_player.192_168_0_11
+                          entity_id: media_player.home
                           method: Input.Back
                 default:
                   - action: button.press
@@ -933,7 +936,7 @@ automation:
                 then:
                   - action: kodi.call_method
                     data:
-                      entity_id: media_player.192_168_0_11
+                      entity_id: media_player.home
                       method: Input.Info
                 else:
                   - action: button.press
