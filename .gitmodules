@@ -52,3 +52,6 @@
 [submodule "submodules/webrtc-camera"]
 	path = submodules/webrtc-camera
 	url = https://github.com/AlexxIT/WebRTC.git
+[submodule "submodules/ha_washdata"]
+	path = submodules/ha_washdata
+	url = https://github.com/3dg1luk43/ha_washdata
