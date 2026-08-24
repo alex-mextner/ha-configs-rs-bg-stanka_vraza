@@ -50,3 +50,15 @@ known_devices.yaml
 # Secrets and credentials
 secrets.yaml
 .env
+
+# HACS-managed submodule integrations: custom_components/<domain> is a plain
+# rsync copy of submodules/<repo>/custom_components/<domain>, not a symlink
+# and not tracked here — the submodule is the source of truth. See
+# scripts/sync-submodule-to-custom-components.sh and AGENTS.md.
+custom_components/xtend_tuya/
+custom_components/mcp_server_http_transport/
+custom_components/yandex_station/
+custom_components/dataplicity/
+custom_components/home_generative_agent/
+custom_components/ha_washdata/
+custom_components/ha_creality_ws/
