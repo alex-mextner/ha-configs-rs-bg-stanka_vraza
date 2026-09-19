@@ -149,6 +149,8 @@ homeassistant:
 lovelace:
   resource_mode: yaml
   resources:
+    - url: /local/u1-share/u1-share-card.js?v=20260919a
+      type: module
     - url: /local/wakeword/wakeword-collection-card.js?v=20260626a
       type: module
     - url: /webrtc/webrtc-camera.js?v=3.6.1
