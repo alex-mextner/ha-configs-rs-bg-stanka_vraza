@@ -83,6 +83,7 @@ services:
       - U1_CAMERA_START_MONITOR_URL=http://192.168.0.26:7125/server/mqtt/publish
       - U1_CAMERA_START_MONITOR_INTERVAL=240
     volumes:
+      - /usr/share/fonts:/usr/share/fonts:ro
       - /home/ultra/homeassistant:/config:ro
     expose:
       - "8090"
