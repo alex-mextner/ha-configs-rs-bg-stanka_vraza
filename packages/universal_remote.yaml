@@ -33,20 +33,6 @@ input_boolean:
     name: Audio mode — was playing at activation
     icon: mdi:play-pause
 
-rest_command:
-  guide_window_open:
-    url: !secret win_guide_open_url
-    method: POST
-    headers:
-      X-Guide-Token: !secret win_guide_secret
-    timeout: 3
-  guide_window_close:
-    url: !secret win_guide_close_url
-    method: POST
-    headers:
-      X-Guide-Token: !secret win_guide_secret
-    timeout: 3
-
 script:
   # Source-aware nav. Routing:
   #   nav_to_tv: on (guide mode) → Samsung TV IR (control its menu)
@@ -276,19 +262,16 @@ script:
                   text: ""
                   done: true
 
-  # Guide toggle: flips nav_to_tv AND toggles the browser window.
+  # Guide toggle: flips nav_to_tv (nav buttons → Samsung TV IR menu).
+  # It used to also open/close a browser window via a listener on the old
+  # Windows install of this PC (192.168.0.11:8765); that host is gone since the
+  # move to Linux (2026-05), so only the routing toggle remains.
   guide_toggle:
     alias: Guide toggle
     mode: single
     sequence:
       - action: input_boolean.toggle
         target: { entity_id: input_boolean.nav_to_tv }
-      - choose:
-          - conditions: "{{ is_state('input_boolean.nav_to_tv', 'on') }}"
-            sequence:
-              - action: rest_command.guide_window_open
-        default:
-          - action: rest_command.guide_window_close
 
   # T9 character send — called from dispatcher for each t9_add_* / t9_cycle_*
   # event. `char` is the logical character name ('a'-'z', 'space', '1').
