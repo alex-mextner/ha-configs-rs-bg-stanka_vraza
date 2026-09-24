@@ -112,7 +112,6 @@ views:
           {% set ov = {
             '192.168.0.1': ['Роутер Ubee','mdi:router-network'],
             '192.168.0.39': ['Home Assistant','mdi:home-assistant'],
-            '192.168.0.11': ['Windows · Kodi','mdi:microsoft-windows'],
             '192.168.0.18': ['MacBook','mdi:laptop'],
             '192.168.0.22': ['Яндекс Станция','mdi:speaker'],
             '192.168.0.17': ['Яндекс Станция','mdi:speaker']

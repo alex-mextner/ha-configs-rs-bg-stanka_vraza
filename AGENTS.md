@@ -173,6 +173,11 @@ The PC is a headless-ish media/HA box; these settings are load-bearing — never
   `/tmp/ha_*.log` + `/tmp/wakeword_noise_watchdog.log` rotated at 5 MB
   (`/etc/logrotate.d/ha-host-logs`; `/tmp` is tmpfs = RAM); per-run
   `/tmp/ha_fail_safe/2*.log` older than 2 days deleted daily (`/etc/cron.d/ha-fail-safe-logs`).
+- **LAN IP 192.168.0.39 must stay fixed** (wlo1, MAC `14:85:7f:cd:c2:4c`): it is hardcoded in
+  `configuration.yaml` `internal_url` and `go2rtc.yaml` WebRTC candidates. Pin it with a DHCP
+  reservation on the Ubee router (192.168.0.1). 192.168.0.11 was this PC's address back when
+  it ran Windows (Kodi "Телек" entry, removed 2026-09-24); the Windows guide-window service
+  (`win_guide_*` secrets, `win_host`) pointed there too and is dead now.
 - **Ollama models live only in `~/.ollama`** (mounted into `homeassistant-ollama-1` as
   uid 1000). Do not create other model dirs (a stale 14 GB `~/ollama-data` duplicate from a
   manual root `docker run` was removed on 2026-09-24); pull models via
