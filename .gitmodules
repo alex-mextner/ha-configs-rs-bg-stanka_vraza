@@ -8,7 +8,8 @@
 	branch = main
 [submodule "submodules/hacs"]
 	path = submodules/hacs
-	url = https://github.com/hacs/integration.git
+	url = https://github.com/alex-mextner/hacs-integration.git
+	branch = local/hacs-frontend
 [submodule "submodules/hass-mcp-server"]
 	path = submodules/hass-mcp-server
 	url = https://github.com/ganhammar/hass-mcp-server.git
@@ -26,10 +27,12 @@
 	url = https://github.com/dext0r/yandex_smart_home.git
 [submodule "submodules/YandexStation"]
 	path = submodules/YandexStation
-	url = https://github.com/AlexxIT/YandexStation.git
+	url = https://github.com/alex-mextner/YandexStation.git
+	branch = master
 [submodule "submodules/hass-ingress-fork"]
 	path = submodules/hass-ingress-fork
-	url = https://github.com/lovelylain/hass_ingress.git
+	url = https://github.com/alex-mextner/hass_ingress.git
+	branch = local-patches
 [submodule "submodules/fish-audio-ru"]
 	path = submodules/fish-audio-ru
 	url = https://github.com/alex-mextner/ha-fish-audio-ru.git
