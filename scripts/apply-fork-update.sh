@@ -31,7 +31,9 @@ TARGET=$(git rev-parse "myfork/$FORK_BRANCH")
 if [ "$BEFORE" = "$TARGET" ]; then
   echo "already at myfork/$FORK_BRANCH ($TARGET) -- nothing to fast-forward"
 else
-  git merge --ff-only "myfork/$FORK_BRANCH"
+  # The fork CI rebases onto upstream and force-pushes, so fast-forward never
+  # works; take the fork branch as-is.
+  git checkout -B "$FORK_BRANCH" "myfork/$FORK_BRANCH"
   echo "fast-forwarded $BEFORE -> $TARGET"
 fi
 
