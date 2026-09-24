@@ -213,7 +213,13 @@ class NetworkDevicesCard extends HTMLElement {
   }
 
   async _load() {
-    if (!this._hass || this._busy) return;
+    if (!this._hass) return;
+    if (this._busy) { this._reloadWanted = true; return this._inflight; }
+    this._inflight = this._loadOnce();
+    return this._inflight;
+  }
+
+  async _loadOnce() {
     this._busy = true; const seq = ++this._seq;
     this._refreshBtn.classList.add('spin');
     try {
@@ -228,6 +234,9 @@ class NetworkDevicesCard extends HTMLElement {
       // Don't wipe a half-typed rename: the list is redrawn when the editor closes.
       this._render(!!this._editing);
     }
+    // An action finished while a refresh was already in flight: fetch once more so
+    // the result (e.g. the "pinned" badge) shows up immediately.
+    if (this._reloadWanted) { this._reloadWanted = false; await this._load(); }
   }
 
   _scheduleScanPoll() {
@@ -261,7 +270,9 @@ class NetworkDevicesCard extends HTMLElement {
 
   _pin(d) {
     const dry = !!this._config.dry_run;
-    this._act(d.mac, () => this._service('network_pin', {mac: d.mac, ip: d.ip, name: this._name(d).slice(0, 64), dry_run: dry}),
+    // Only a real device name goes to the router's lease table, never a UI placeholder.
+    const leaseName = (d.hostname || (d.names || []).find(Boolean) || '').slice(0, 64);
+    this._act(d.mac, () => this._service('network_pin', {mac: d.mac, ip: d.ip, name: leaseName, dry_run: dry}),
       dry ? `Тест (dry-run): ${d.ip} был бы закреплён за ${d.mac}` : `${d.ip} закреплён за ${this._name(d)}`);
   }
   _unpin(d) {
@@ -478,12 +489,20 @@ class NetworkDevicesCard extends HTMLElement {
     name.value = this._name(d); name.maxLength = 64; name.placeholder = 'Имя'; name.setAttribute('aria-label', 'Имя устройства');
     const preview = this._icon(this._iconFor(d), p, 'preview');
     const icon = this._node('input', null, p);
-    icon.value = this._iconFor(d); icon.placeholder = 'mdi:laptop'; icon.setAttribute('aria-label', 'Иконка (mdi:…)');
-    icon.addEventListener('input', () => { const v = icon.value.trim().toLowerCase(); if (ND_MDI.test(v)) preview.setAttribute('icon', v); });
+    // Pre-fill only a real icon from router-cli; the client-side guess is just the placeholder,
+    // so a plain rename doesn't freeze the heuristic icon as a permanent override.
+    const origIcon = ND_MDI.test(d.icon || '') && d.icon === this._iconFor(d) ? d.icon : '';
+    const origName = this._name(d);
+    icon.value = origIcon; icon.placeholder = this._iconFor(d); icon.setAttribute('aria-label', 'Иконка (mdi:…)');
+    icon.addEventListener('input', () => { const v = icon.value.trim().toLowerCase(); preview.setAttribute('icon', ND_MDI.test(v) ? v : this._iconFor(d)); });
     const save = () => {
       const v = icon.value.trim().toLowerCase();
       if (v && !ND_MDI.test(v)) { this._toast('Иконка должна быть вида mdi:имя'); return; }
-      this._alias(d, name.value.trim(), v);
+      const n = name.value.trim();
+      const newName = n !== origName ? n : '';
+      const newIcon = v !== origIcon ? v : '';
+      if (!newName && !newIcon) { this._editing = null; this._renderList(); return; }
+      this._alias(d, newName, newIcon);
     };
     for (const inp of [name, icon]) inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { this._editing = null; this._renderList(); } });
     this._button('Сохранить', 'mdi:content-save', p, 'primary', save).disabled = busy;
