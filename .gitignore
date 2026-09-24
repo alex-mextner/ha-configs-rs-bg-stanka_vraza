@@ -62,3 +62,6 @@ custom_components/dataplicity/
 custom_components/home_generative_agent/
 custom_components/ha_washdata/
 custom_components/ha_creality_ws/
+
+# host-actions auth header for shell_command curl calls (secret)
+.host_actions_header

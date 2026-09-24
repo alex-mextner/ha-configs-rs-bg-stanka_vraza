@@ -191,15 +191,18 @@ template:
           listed_count: "{{ (states('sensor.debug_files_list') | default('')).split(',') | length }}"
 
 # ── Shell commands to restart voice services with new settings ──
+# The HA container has no docker CLI, so these call the host-actions bridge
+# (~/.local/bin/ha-host-actions.py, POST /voice/<action>, fixed allow-list).
+# Auth header lives in the gitignored /config/.host_actions_header.
 shell_command:
-  voice_restart_services: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-openwakeword wyoming-satellite"
-  voice_restart_satellite: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d --force-recreate wyoming-satellite"
-  voice_stop_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml stop wyoming-satellite"
-  voice_start_recording: "docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml start wyoming-satellite"
-  voice_play_last_wake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 $(ls -1t /tmp/debug/*-wake.wav | head -n1)' 2>/dev/null || echo 'failed'"
-  voice_play_last_stt: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 $(ls -1t /tmp/debug/*-stt.wav | head -n1)' 2>/dev/null || echo 'failed'"
-  voice_play_awake: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 /app/sounds/awake.wav' 2>/dev/null || echo 'failed'"
-  voice_play_done: "docker exec homeassistant-wyoming-satellite-1 sh -c 'aplay -D plughw:CARD=ArrayUAC10,DEV=0 /app/sounds/done.wav' 2>/dev/null || echo 'failed'"
+  voice_restart_services: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/restart-services"
+  voice_restart_satellite: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/restart-satellite"
+  voice_stop_recording: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/stop-recording"
+  voice_start_recording: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/start-recording"
+  voice_play_last_wake: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/play-last-wake"
+  voice_play_last_stt: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/play-last-stt"
+  voice_play_awake: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/play-awake"
+  voice_play_done: "curl -fsS -m 110 -X POST -H @/config/.host_actions_header http://172.20.0.1:8787/voice/play-done"
 
 # ── Automations: latency tracking ──
 automation:
