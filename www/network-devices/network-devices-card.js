@@ -245,7 +245,9 @@ class NetworkDevicesCard extends HTMLElement {
   }
 
   _errText(e) {
-    const m = String(e?.message || e || 'ошибка');
+    // Bridge errors look like "RuntimeError('router failed (5): router: ... why: ...')": keep the gist.
+    const m = String(e?.message || e || 'ошибка').replace(/^\w+Error\(['"]?/, '').replace(/['"]?\)$/, '')
+      .replace(/^router failed \(\d+\): (router: )?/, '').split('\\n')[0];
     return ({invalid_mac: 'некорректный MAC', invalid_ip: 'некорректный IP', invalid_icon: 'иконка должна быть вида mdi:имя',
       invalid_name: 'недопустимое имя', name_or_icon_required: 'укажите имя или иконку'})[m] || m;
   }
@@ -413,7 +415,8 @@ class NetworkDevicesCard extends HTMLElement {
       const b = this._node('span', null, l1, 'badge warn'); this._icon('mdi:alert', b);
       this._node('span', `IP изменился: закреплён ${d.reserved_ip}`, b);
     }
-    const prev = (d.ip_history || []).filter(ip => ip && ip !== d.ip);
+    // router-cli gives [{ip, first_seen, last_seen}]; accept plain strings too.
+    const prev = (d.ip_history || []).map(h => typeof h === 'string' ? h : h?.ip).filter(ip => ip && ip !== d.ip);
     if (prev.length) this._node('span', `ранее: ${[...new Set(prev)].slice(-3).join(', ')}`, l1).title = 'История IP';
 
     const l2 = this._node('div', null, main, 'line');
