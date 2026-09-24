@@ -22,6 +22,12 @@ vkliuchi_serialy:
   alias: Включи сериалы
   mode: single
   sequence:
+  # Always make sure Kodi is up (idempotent), even if the TV is already on pc:
+  # Kodi quits itself after 30 min without playback (packages/kodi_lifecycle.yaml).
+  - action: rest_command.host_screen_unlock
+    continue_on_error: true
+  - action: rest_command.host_kodi_start
+    continue_on_error: true
   - if:
     - condition: template
       value_template: '{{ states("input_text.tv_source") == "pc" }}'

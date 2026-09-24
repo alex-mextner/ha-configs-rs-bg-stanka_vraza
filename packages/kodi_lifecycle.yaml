@@ -1,0 +1,33 @@
+# Kodi lifecycle.
+# - Start: on demand only — script.vkliuchi_serialy (source → pc) and
+#   projector power-on (rest_command.host_projector_on) start Kodi.
+# - Stop: Kodi quits by itself after 30 min with nothing playing
+#   (idle or paused), so it does not sit idle on the desktop for weeks.
+# The PC itself never sleeps on AC (see AGENTS.md → Host requirements).
+
+automation:
+  - alias: Kodi quit when idle
+    id: kodi_quit_when_idle
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/5"
+    condition:
+      - condition: template
+        value_template: >-
+          {% set players = ['media_player.kodi_home', 'media_player.kodi_home_2'] %}
+          {% set ns = namespace(quiet=true, alive=false) %}
+          {% for p in players %}
+            {% set s = states[p] %}
+            {% if s is not none %}
+              {% if s.state == 'playing' or (now() - s.last_changed).total_seconds() < 1800 %}
+                {% set ns.quiet = false %}
+              {% endif %}
+              {% if s.state not in ['off', 'unavailable', 'unknown'] %}
+                {% set ns.alive = true %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.quiet and ns.alive }}
+    action:
+      - action: rest_command.host_kodi_stop
