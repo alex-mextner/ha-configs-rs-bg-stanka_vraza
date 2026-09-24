@@ -3,6 +3,9 @@
 #   projector power-on (rest_command.host_projector_on) start Kodi.
 # - Stop: Kodi quits by itself after 30 min with nothing playing
 #   (idle or paused), so it does not sit idle on the desktop for weeks.
+# media_player.home is the Kodi integration entity for this PC (172.20.0.1).
+# NOT media_player.kodi_home*: those are Music Assistant players, they stay
+# 'idle' even when Kodi is down and do not reflect video playback.
 # The PC itself never sleeps on AC (see AGENTS.md → Host requirements).
 
 automation:
@@ -15,7 +18,7 @@ automation:
     condition:
       - condition: template
         value_template: >-
-          {% set players = ['media_player.kodi_home', 'media_player.kodi_home_2'] %}
+          {% set players = ['media_player.home'] %}
           {% set ns = namespace(quiet=true, alive=false) %}
           {% for p in players %}
             {% set s = states[p] %}
