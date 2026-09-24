@@ -501,6 +501,20 @@ class ArrayStatusWriter:
         }
 
 
+_LAST_WARNING: dict[str, float] = {}
+
+
+def best_effort(name: str, fn, *args) -> None:
+    """Run a side output; on OSError warn at most once a minute and keep going."""
+    try:
+        fn(*args)
+    except OSError as exc:
+        now = time.monotonic()
+        if now - _LAST_WARNING.get(name, float("-inf")) >= 60.0:
+            _LAST_WARNING[name] = now
+            print(f"[wakeword-tee] {name} failed, audio keeps flowing: {exc}", file=sys.stderr, flush=True)
+
+
 def main() -> int:
     args = parse_args()
     if not args.no_record and args.output_dir is None:
@@ -548,16 +562,20 @@ def main() -> int:
             usable = len(raw) - (len(raw) % frame_size)
             pending = raw[usable:]
             usable_raw = raw[:usable]
-            status.observe(usable_raw)
             ch0 = extract_channel0(usable_raw, args.channels_in, args.sample_width)
+            if ch0:
+                # The satellite stream comes first: side outputs below may fail
+                # (ENOSPC took capture down 609k times in Aug-Sep 2026) but must
+                # never interrupt the audio the wake service is listening to.
+                stdout.write(ch0)
+                stdout.flush()
+            best_effort("status file", status.observe, usable_raw)
             if not ch0:
                 continue
-            positive_recorder.observe(ch0)
-            stdout.write(ch0)
-            stdout.flush()
-            writer.write(ch0)
+            best_effort("positive recorder", positive_recorder.observe, ch0)
+            best_effort("raw_live writer", writer.write, ch0)
     finally:
-        writer.close()
+        best_effort("raw_live writer close", writer.close)
 
     return 0
 
