@@ -1,7 +1,7 @@
 [submodule "submodules/dataplicity"]
 	path = submodules/dataplicity
 	url = https://github.com/alex-mextner/Dataplicity.git
-	branch = fix/bump-dataplicity-agent
+	branch = prod
 [submodule "submodules/home-generative-agent"]
 	path = submodules/home-generative-agent
 	url = https://github.com/goruck/home-generative-agent.git
@@ -27,7 +27,7 @@
 	url = https://github.com/dext0r/yandex_smart_home.git
 [submodule "submodules/YandexStation"]
 	path = submodules/YandexStation
-	url = https://github.com/alex-mextner/YandexStation.git
+	url = https://github.com/AlexxIT/YandexStation.git
 	branch = master
 [submodule "submodules/hass-ingress-fork"]
 	path = submodules/hass-ingress-fork
