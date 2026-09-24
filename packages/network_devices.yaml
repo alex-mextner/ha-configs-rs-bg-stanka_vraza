@@ -1,0 +1,56 @@
+# Network devices inventory (router-cli) exposed to the network-devices Lovelace card.
+# Calls go through the host action bridge (ha-host-actions, 172.20.0.1:8787), which runs
+# `router inventory list|scan|reserve|unreserve|alias` with validated argv.
+# The card calls these with return_response via the authenticated websocket API —
+# the inventory is never served from /local (public through the Dataplicity tunnel).
+
+rest_command:
+  network_inventory:
+    url: !secret host_network_inventory_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"filter": {{ filter | default("all", true) | to_json }}, "since": {{ since | default("", true) | to_json }}, "favicons": {{ favicons | default(true) | to_json }}}
+    timeout: 25
+
+  network_scan:
+    url: !secret host_network_scan_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"ip": {{ ip | default("", true) | to_json }}}
+    timeout: 30
+
+  network_pin:
+    url: !secret host_network_pin_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"mac": {{ mac | to_json }}, "ip": {{ ip | to_json }}, "name": {{ name | default("", true) | to_json }}, "dry_run": {{ dry_run | default(false) | to_json }}}
+    timeout: 65
+
+  network_unpin:
+    url: !secret host_network_unpin_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"mac": {{ mac | to_json }}, "dry_run": {{ dry_run | default(false) | to_json }}}
+    timeout: 65
+
+  network_alias:
+    url: !secret host_network_alias_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"mac": {{ mac | to_json }}, "name": {{ name | default("", true) | to_json }}, "icon": {{ icon | default("", true) | to_json }}}
+    timeout: 20
