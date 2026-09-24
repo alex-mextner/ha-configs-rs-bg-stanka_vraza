@@ -108,6 +108,7 @@ views:
       - type: button
         name: Устройства в сети
         icon: mdi:lan
+        icon_height: 40px
         show_state: false
         tap_action:
           action: navigate
