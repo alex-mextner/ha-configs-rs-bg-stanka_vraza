@@ -75,6 +75,15 @@ if [ -z "$DATAPLICITY_URL" ]; then
     DATAPLICITY_URL="https://spry-gazelle-4693.dataplicity.io/"
 fi
 
+# Probe the HA API with the long-lived token when available so health checks get
+# 200 instead of flooding home-assistant.log with "invalid authentication" (401).
+ha_auth_args() {
+    local token
+    token=$(sed -n 's/^HA_TOKEN=//p' /home/ultra/.env 2>/dev/null | tail -n 1)
+    [ -n "$token" ] && printf '%s
+' -H "Authorization: Bearer $token"
+}
+
 check_ha() {
     local url="${HA_URL:-http://127.0.0.1:8123}"
     local api_url="${url%/}/api/"
@@ -84,7 +93,8 @@ check_ha() {
     local attempt
 
     for attempt in 1 2 3; do
-        response=$(curl -sS --connect-timeout 5 -m 12 -o /dev/null -w '%{http_code}' "$api_url" 2>/dev/null || true)
+        response=$(ha_auth_args | xargs -d '
+' curl -sS --connect-timeout 5 -m 12 -o /dev/null -w '%{http_code}' "$api_url" 2>/dev/null || true)
         if [ "$response" = "200" ] || [ "$response" = "401" ]; then
             log "✓ HA is accessible (HTTP $response)"
             return 0
@@ -130,7 +140,8 @@ check_dataplicity() {
 
     headers=$(mktemp "$LOG_DIR/dataplicity_headers.XXXXXX")
     body=$(mktemp "$LOG_DIR/dataplicity_body.XXXXXX")
-    response=$(curl -sS -L --connect-timeout 10 -m 20 -D "$headers" -o "$body" -w '%{http_code}' "$api_url" 2>/dev/null || true)
+    response=$(ha_auth_args | xargs -d '
+' curl -sS -L --connect-timeout 10 -m 20 -D "$headers" -o "$body" -w '%{http_code}' "$api_url" 2>/dev/null || true)
 
     if grep -Eqi "Unknown domain|isn'?t registered|isn&#x27;t registered|not registered" "$body"; then
         subdomain=$(awk -F': ' 'tolower($1) == "wormhole-subdomain" { print $2; exit }' "$headers" | tr -d '\r')
