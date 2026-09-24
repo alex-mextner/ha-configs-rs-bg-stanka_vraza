@@ -146,6 +146,28 @@ Then restart HA: `docker restart homeassistant-homeassistant-1`.
 - Prefer the Makefile workflow for setup/tasks (`make devdeps`, `make testdeps`,
   `make runtimedeps`) over legacy helper scripts.
 
+## Host requirements (MUST stay true)
+
+The PC is a headless-ish media/HA box; these settings are load-bearing — never disable them.
+
+- **GDM autologin MUST be enabled** for user `ultra` (`/etc/gdm3/custom.conf`,
+  `[daemon]` → `AutomaticLoginEnable=true`, `AutomaticLogin=ultra`). Without it, any
+  session restart (gnome-shell leak, reboot, gdm restart) leaves the TV on the login screen
+  and Kodi / host actions (`ha-host-actions`) cannot open anything on the display.
+  It was found silently commented out on 2026-09-24 (file changed 2026-05-29) — check it
+  after any gdm3 upgrade or display-manager tinkering.
+- **The PC must never sleep while Kodi runs.** Currently guaranteed globally: GNOME
+  `sleep-inactive-ac-type='nothing'` + `/etc/systemd/logind.conf.d/lid-switch.conf`
+  (`IdleAction=ignore`, power/suspend keys ignored). Screen blanking during playback is
+  inhibited by the `media-inhibit` user service. Do not re-enable automatic suspend.
+- **Kodi runs on demand, not forever.** `script.vkliuchi_serialy` (source → pc) and
+  projector power-on start Kodi via `ha-host-actions`; `packages/kodi_lifecycle.yaml`
+  quits it after 30 min with nothing playing.
+- **Ollama models live only in `~/.ollama`** (mounted into `homeassistant-ollama-1` as
+  uid 1000). Do not create other model dirs (a stale 14 GB `~/ollama-data` duplicate from a
+  manual root `docker run` was removed on 2026-09-24); pull models via
+  `docker exec homeassistant-ollama-1 ollama pull ...`.
+
 ## Home Assistant Docker management
 HA runs in Docker under `homeassistant-homeassistant-1`. All docker commands run as
 current user (no `sudo`/`run0` needed).
