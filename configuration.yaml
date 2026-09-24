@@ -158,6 +158,8 @@ lovelace:
   resources:
     - url: /local/u1-share/u1-inspector-card.js?v=20260919b
       type: module
+    - url: /local/network-devices/network-devices-card.js?v=20260924a
+      type: module
     - url: /local/u1-share/u1-share-card.js?v=20260919a
       type: module
     - url: /local/wakeword/wakeword-collection-card.js?v=20260626a
