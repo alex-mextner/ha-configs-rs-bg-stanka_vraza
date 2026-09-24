@@ -14,8 +14,21 @@ if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-ha >> "$LOG" 2>&1; 
     exit $?
 fi
 
-if ! /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-dataplicity >> "$LOG" 2>&1; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dataplicity check failed while local HA is online; running dataplicity fix..." >> "$LOG"
+# Require two consecutive failed probes (cron runs every 5 min) before reloading
+# the Dataplicity entry: single blips (e.g. the nightly router reconnect at 03:00)
+# used to trigger needless reloads, each of which leaks an m2m client thread.
+DP_FAILS=/tmp/ha_fail_safe/dataplicity_consecutive_failures
+if /home/ultra/homeassistant/scripts/ha_fail_safe.sh check-dataplicity >> "$LOG" 2>&1; then
+    rm -f "$DP_FAILS"
+else
+    fails=$(( $(cat "$DP_FAILS" 2>/dev/null || echo 0) + 1 ))
+    echo "$fails" > "$DP_FAILS"
+    if [ "$fails" -lt 2 ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dataplicity check failed ($fails in a row); waiting for next run before fixing" >> "$LOG"
+        exit 0
+    fi
+    rm -f "$DP_FAILS"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dataplicity check failed $fails times in a row while local HA is online; running dataplicity fix..." >> "$LOG"
     /home/ultra/homeassistant/scripts/ha_fail_safe.sh fix-dataplicity >> "$LOG" 2>&1
     exit $?
 fi
