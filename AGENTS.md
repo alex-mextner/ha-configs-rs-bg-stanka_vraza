@@ -162,7 +162,17 @@ The PC is a headless-ish media/HA box; these settings are load-bearing — never
   inhibited by the `media-inhibit` user service. Do not re-enable automatic suspend.
 - **Kodi runs on demand, not forever.** `script.vkliuchi_serialy` (source → pc) and
   projector power-on start Kodi via `ha-host-actions`; `packages/kodi_lifecycle.yaml`
-  quits it after 30 min with nothing playing.
+  quits it after 30 min with nothing playing. The Kodi entity for this PC is
+  `media_player.home` (Kodi integration); `media_player.kodi_home*` are Music Assistant
+  players and do not reflect video playback — never use them for Kodi state.
+- **gnome-shell leak guard** (root): `gnome-shell-leak-guard.timer` runs
+  `/usr/local/sbin/gnome-shell-leak-guard` every 15 min, logs RSS to
+  `/var/log/gnome-shell-rss.log`, and restarts gdm when gnome-shell > 3 GB and Kodi is not
+  playing (relies on autologin). Normal RSS after start is ~300 MB.
+- **Log limits:** journald capped at 500 MB (`/etc/systemd/journald.conf.d/size.conf`);
+  `/tmp/ha_*.log` + `/tmp/wakeword_noise_watchdog.log` rotated at 5 MB
+  (`/etc/logrotate.d/ha-host-logs`; `/tmp` is tmpfs = RAM); per-run
+  `/tmp/ha_fail_safe/2*.log` older than 2 days deleted daily (`/etc/cron.d/ha-fail-safe-logs`).
 - **Ollama models live only in `~/.ollama`** (mounted into `homeassistant-ollama-1` as
   uid 1000). Do not create other model dirs (a stale 14 GB `~/ollama-data` duplicate from a
   manual root `docker run` was removed on 2026-09-24); pull models via
