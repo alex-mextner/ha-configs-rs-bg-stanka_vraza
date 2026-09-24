@@ -134,12 +134,19 @@ services:
       - /custom-models
       - --preload-model
       - ey_milosh
+      # Wake word disabled on 2026-09-24: ey_milosh fired 100-250 false wakes/day on
+      # household TV audio (see WAKEWORD_STATUS.md). prob <= 1.0 never passes, so the
+      # service keeps answering the satellite without ever detecting. Restore a real
+      # threshold only together with a model that passes wakebench on real noise.
       - --threshold
-      - "0.991"
+      - "1.0"
       - --debug
     ports:
       - "10400:10400"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "3"}
     networks:
       - ha-net
 
@@ -199,6 +206,9 @@ services:
         "--no-zeroconf", "--debug", "--debug-recording-dir", "/tmp/debug",
       ]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "3"}
     networks:
       - ha-net
 
