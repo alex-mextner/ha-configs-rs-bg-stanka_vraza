@@ -134,6 +134,13 @@ device_tracker:
 yandex_station:
   domain: yandex.com
   ssl: false
+  # Manual local IPs: HA runs on a Docker bridge network, so mDNS/zeroconf
+  # discovery of speakers does not work. Upstream-supported option.
+  devices:
+    M00ZRW3008RAJG:  # Мини гостиная
+      host: 192.168.0.22
+    M10DST310HXNPK:  # Станция Мини у Вовы
+      host: 192.168.0.17
 
 rutracker_transmission:
   host_login_url: !secret rutracker_browser_login_url
