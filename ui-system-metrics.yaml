@@ -105,37 +105,23 @@ views:
             hours_to_show: 24
             refresh_interval: 0
 
-      - type: markdown
-        title: DHCP Monitor
-        content: |
-          {% set ns = namespace(rows=[]) %}
-          {% set ov = {
-            '192.168.0.1': ['Роутер Ubee','mdi:router-network'],
-            '192.168.0.39': ['Home Assistant','mdi:home-assistant'],
-            '192.168.0.18': ['MacBook','mdi:laptop'],
-            '192.168.0.22': ['Яндекс Станция','mdi:speaker'],
-            '192.168.0.17': ['Яндекс Станция','mdi:speaker']
-          } %}
-          {% for i in range(1,6) %}
-            {% set dev = 'sensor.dhcp_device_' ~ i %}
-            {% set ip = states(dev) %}
-            {% if ip not in ['unknown','unavailable','Unknown'] and ns.rows|length < 5 %}
-              {% set ns.rows = ns.rows + [{'ip':ip,'name': state_attr(dev,'hostname') or (ov[ip][0] if ip in ov else ip),'icon': ov[ip][1] if ip in ov else 'mdi:history'}] %}
-            {% endif %}
-          {% endfor %}
-          {% set ips = ns.rows | map(attribute='ip') | list %}
-          {% for d in state_attr('sensor.ubee_devices','devices') or [] %}
-            {% if ns.rows|length < 5 and d.ip not in ips and (d.ip in ov or d.identified) %}
-              {% set ns.rows = ns.rows + [{'ip':d.ip,'name': ov[d.ip][0] if d.ip in ov else d.name,'icon': ov[d.ip][1] if d.ip in ov else d.icon}] %}
-            {% endif %}
-          {% endfor %}
-          ### <ha-icon icon="mdi:wifi"></ha-icon> Recent devices
-          | | | |
-          |:-:|:--|--:|
-          {% for r in ns.rows -%}
-          | <ha-icon icon="{{ r.icon }}"></ha-icon> | **{{ r.name }}** | `{{ r.ip }}` |
-          {% endfor -%}
-          {% if ns.rows|length == 0 %}_нет данных_{% endif %}
+      - type: button
+        name: Устройства в сети
+        icon: mdi:lan
+        show_state: false
+        tap_action:
+          action: navigate
+          navigation_path: /system-metrics/network
+
+  - title: Network
+    path: network
+    panel: true
+    cards:
+      - type: custom:network-devices-card
+        title: Устройства в сети
+        default_filter: recent
+        refresh_interval: 60
+        dry_run: true
 
   - title: Voice
     path: voice
