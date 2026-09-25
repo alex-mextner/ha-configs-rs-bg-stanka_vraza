@@ -86,13 +86,6 @@ automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
-device_tracker:
-  - platform: ubee
-    host: 192.168.0.1
-    username: admin
-    password: !secret ubee_password
-    model: EVW32C-0N
-
 # media_player:
 #   #   - platform: samsungtv_tizen
 #   # host: 192.168.0.26

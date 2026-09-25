@@ -349,14 +349,14 @@ Use `git diff` to verify changes before committing.
 ### Example
 ```yaml
 # GOOD — secrets.yaml
-ubee_password: YOUR_ROUTER_PASSWORD_HERE
+host_actions_token: YOUR_TOKEN_HERE
 
-# GOOD — configuration.yaml
-device_tracker:
-  - platform: ubee
-    host: 192.168.0.1
-    username: admin
-    password: !secret ubee_password
+# GOOD — packages/*.yaml
+rest_command:
+  example:
+    url: !secret host_network_update_url
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
 ```
 
 # HA Fail-Safe System
