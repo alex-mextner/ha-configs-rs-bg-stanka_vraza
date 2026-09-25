@@ -149,6 +149,8 @@ yandex_station:
       host: 192.168.0.22
     M10DST310HXNPK:  # Станция Мини у Вовы
       host: 192.168.0.17
+    M0011HM00Z86HG:  # Станция Мини new (3c:0b:4f:d9:db:ae)
+      host: 192.168.0.44
 
 rutracker_transmission:
   host_login_url: !secret rutracker_browser_login_url
