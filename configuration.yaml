@@ -44,7 +44,8 @@ ingress:
     require_admin: true
     title: Music Assistant
     icon: mdi:music-box
-    url: http://music-assistant:8095
+    # MA runs on the host network (ha-net gateway), see ha.docker-compose.yaml
+    url: http://172.20.0.1:8095
     work_mode: ingress
     ui_mode: normal
   transmission:
@@ -151,7 +152,7 @@ lovelace:
   resources:
     - url: /local/u1-share/u1-inspector-card.js?v=20260919b
       type: module
-    - url: /local/network-devices/network-devices-card.js?v=20260925g
+    - url: /local/network-devices/network-devices-card.js?v=20260925i
       type: module
     - url: /local/u1-share/u1-share-card.js?v=20260919a
       type: module
