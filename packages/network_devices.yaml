@@ -1,6 +1,7 @@
 # Network devices inventory (router-cli) exposed to the network-devices Lovelace card.
 # Calls go through the host action bridge (ha-host-actions, 172.20.0.1:8787), which runs
-# `router inventory list|update|scan|reserve|unreserve|alias` with validated argv.
+# `router inventory list|update|scan|reserve|unreserve|alias` with validated argv. After a
+# reserve/unreserve the bridge runs one `router inventory update`, so the card sees the change.
 # The card calls these with return_response via the authenticated websocket API —
 # the inventory is never served from /local (public through the Dataplicity tunnel).
 #
@@ -95,7 +96,8 @@ rest_command:
     content_type: "application/json"
     payload: >-
       {"mac": {{ mac | to_json }}, "ip": {{ ip | to_json }}, "name": {{ name | default("", true) | to_json }}, "dry_run": {{ dry_run | default(false) | to_json }}}
-    timeout: 65
+    # write + one `router inventory update` so the card sees the new reservation at once
+    timeout: 125
 
   network_unpin:
     url: !secret host_network_unpin_url
@@ -105,7 +107,19 @@ rest_command:
     content_type: "application/json"
     payload: >-
       {"mac": {{ mac | to_json }}, "dry_run": {{ dry_run | default(false) | to_json }}}
-    timeout: 65
+    timeout: 125
+
+  # All static-lease slots taken: free replace_mac's reservation and pin mac to ip in one call.
+  # The bridge restores the old reservation if the new one fails.
+  network_pin_replace:
+    url: !secret host_network_pin_replace_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"replace_mac": {{ replace_mac | to_json }}, "mac": {{ mac | to_json }}, "ip": {{ ip | to_json }}, "name": {{ name | default("", true) | to_json }}, "dry_run": {{ dry_run | default(false) | to_json }}}
+    timeout: 170
 
   network_alias:
     url: !secret host_network_alias_url
