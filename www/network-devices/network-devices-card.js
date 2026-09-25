@@ -557,7 +557,8 @@ class NetworkDevicesCard extends HTMLElement {
   }
   _alias(d, name, icon) {
     const patch = {};
-    if (name) { patch.display_name = name; if (d.friendly_name) patch.friendly_name = name; }
+    // router-cli composes display_name from friendly_name (new schema): patch what the alias sets.
+    if (name) { if ('friendly_name' in d) patch.friendly_name = name; else patch.display_name = name; }
     if (icon) patch.icon = icon;
     this._act(d.mac, () => this._service('network_alias', {mac: d.mac, name, icon}), 'Сохранено', {[d.mac]: patch});
   }
@@ -595,6 +596,16 @@ class NetworkDevicesCard extends HTMLElement {
   // `label`; the personal name from friendly_name / display_name. The product is prefixed only when
   // the personal name doesn't already say what the device is.
   _name(d) {
+    // New router-cli schema (brand/model/product/friendly_name): display_name is already the rich
+    // "<brand product> «<friendly name>»"; compose it here only while a fresh rename is not in it yet.
+    if ('friendly_name' in d || 'brand' in d) {
+      const dn = String(d.display_name || ''), fn = String(d.friendly_name || '').trim();
+      // router-cli deliberately leaves out serials, SSIDs and generic names, so only a pending
+      // (optimistic) rename is composed here.
+      if (!fn || dn.includes(fn) || this._overrides.get(d.mac)?.patch?.friendly_name !== fn) return dn || this._plainName(d);
+      const product = this._product(d);
+      return product && !fn.toLowerCase().includes(product.toLowerCase()) ? `${product} «${fn}»` : fn;
+    }
     const own = this._ownName(d);
     const product = this._product(d);
     if (!product) return own || this._plainName(d);
@@ -630,14 +641,14 @@ class NetworkDevicesCard extends HTMLElement {
   _loc(d) { return String(d?.location || d?.placement || d?.room || '').trim(); }
   // Short access-point label for topology: "Xiaomi AX3000 · Гостиная".
   _apLabel(ap) {
-    const short = [ap.brand, ap.model].filter(Boolean).join(' ') || this._name(ap);
+    const short = this._product(ap) || this._name(ap);
     return [short, this._loc(ap)].filter(Boolean).join(' · ');
   }
   _viaLabel(c) {
     if (!c) return '';
     const ap = c.via ? (this._data?.devices || []).find(x => x.mac === c.via) : null;
     const loc = c.via_location || (ap && this._loc(ap)) || '';
-    const base = ap ? ([ap.brand, ap.model].filter(Boolean).join(' ') || this._name(ap)) : (c.via_name || '');
+    const base = ap ? (this._product(ap) || this._name(ap)) : (c.via_name || '');
     return [base, loc].filter(Boolean).join(' · ');
   }
   _selectionIn(el) {
@@ -1605,7 +1616,8 @@ class NetworkDevicesCard extends HTMLElement {
     fact('Статус', d.is_self ? 'онлайн (этот сервер)' : d.online ? 'онлайн' : `офлайн, был ${this._ago(d.last_seen)}`, d.online ? 'mdi:lan-connect' : 'mdi:lan-disconnect');
     fact('Имя хоста', d.hostname, 'mdi:dns', true);
     if (d.label && d.label !== this._name(d)) fact('Опознано как', d.label, 'mdi:tag-outline', true);
-    const product = [d.brand, d.model].filter(Boolean).join(' ') || d.product;
+    const withBrand = (s) => (d.brand && s && !s.toLowerCase().includes(String(d.brand).toLowerCase()) ? `${d.brand} ${s}` : s);
+    const product = withBrand(d.model || d.product || '');
     if (product) fact('Модель', product, 'mdi:information-outline', true);
     fact('Где стоит', this._loc(d), 'mdi:map-marker', true);
     const other = (d.names || []).filter(n => n && n !== d.hostname && n !== this._name(d));
