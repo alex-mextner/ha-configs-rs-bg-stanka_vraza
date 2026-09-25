@@ -2,6 +2,10 @@
  * The inventory is fetched over the HA websocket with return_response — never via /local.
  * Everything coming from devices (hostnames, page titles, vendors) is rendered with textContent only.
  *
+ * Router traffic: the auto-refresh only re-reads the LOCAL inventory (rest_command.network_inventory).
+ * The router itself is polled hourly by a systemd timer, and by the "Обновить" button
+ * (rest_command.network_update → router inventory update), which the bridge serializes.
+ *
  * Config: title, default_filter (recent|active|all|pinned|new|unknown), refresh_interval (s, default 60),
  *         recent_hours (24), new_hours (24), dry_run (bool: pin/unpin pass --dry-run to router-cli).
  */
@@ -180,8 +184,9 @@ class NetworkDevicesCard extends HTMLElement {
     const hb = this._node('div', null, head, 'headbtns');
     this._scanBtn = this._button('Сканировать', 'mdi:radar', hb, '', () => this._scan(null));
     this._scanBtn.title = 'Проверить веб-интерфейсы всех онлайн-устройств';
-    this._refreshBtn = this._button('', 'mdi:refresh', hb, 'icon', () => this._load());
-    this._refreshBtn.title = 'Обновить'; this._refreshBtn.setAttribute('aria-label', 'Обновить');
+    this._refreshBtn = this._button('Обновить', 'mdi:refresh', hb, '', () => this._poll());
+    this._refreshBtn.title = 'Опросить роутер сейчас (обычно раз в час)';
+    this._refreshBtn.setAttribute('aria-label', 'Обновить: опросить роутер');
     this._chips = this._node('div', null, card, 'chips');
     this._chips.setAttribute('role', 'toolbar');
     const tools = this._node('div', null, card, 'tools');
@@ -221,7 +226,6 @@ class NetworkDevicesCard extends HTMLElement {
 
   async _loadOnce() {
     this._busy = true; const seq = ++this._seq;
-    this._refreshBtn.classList.add('spin');
     try {
       const data = await this._service('network_inventory', {filter: 'all'});
       if (seq !== this._seq) return;
@@ -230,13 +234,33 @@ class NetworkDevicesCard extends HTMLElement {
     } catch (e) {
       this._error = `Не удалось получить список устройств: ${this._errText(e)}`;
     } finally {
-      this._busy = false; this._refreshBtn.classList.remove('spin');
+      this._busy = false;
       // Don't wipe a half-typed rename: the list is redrawn when the editor closes.
       this._render(!!this._editing);
     }
     // An action finished while a refresh was already in flight: fetch once more so
     // the result (e.g. the "pinned" badge) shows up immediately.
     if (this._reloadWanted) { this._reloadWanted = false; await this._load(); }
+  }
+
+  // "Обновить": the ONLY way this card makes the router be polled (otherwise an hourly timer
+  // does it; the auto-refresh above only re-reads the local inventory DB). The bridge
+  // serializes polls and reuses one younger than a minute, so repeated clicks are harmless.
+  async _poll() {
+    if (!this._hass || this._polling) return;
+    this._polling = true; this._refreshBtn.disabled = true; this._refreshBtn.classList.add('spin');
+    try {
+      const r = await this._service('network_update', {});
+      this._toast(r.polled ? `Роутер опрошен: ${r.seen ?? '?'} устройств онлайн`
+        : r.reason === 'fresh' ? 'Данные уже свежие (опрос меньше минуты назад)' : 'Опрос уже идёт');
+      this._hass.callService('homeassistant', 'update_entity',
+        {entity_id: ['sensor.network_devices_online', 'sensor.network_inventory_last_poll']}).catch(() => {});
+    } catch (e) {
+      this._toast(`Не удалось опросить роутер: ${this._errText(e)}`);
+    } finally {
+      this._polling = false; this._refreshBtn.disabled = false; this._refreshBtn.classList.remove('spin');
+    }
+    await this._load();
   }
 
   _scheduleScanPoll() {
@@ -355,7 +379,10 @@ class NetworkDevicesCard extends HTMLElement {
       parts.push(`${devices.length} устройств, ${online} онлайн`);
       const r = this._data.router || {};
       if (r.model || r.host) parts.push(`роутер ${[r.model, r.host].filter(Boolean).join(' · ')}`);
-      if (this._data.generated_at) parts.push(`данные ${this._ago(this._data.generated_at)}`);
+      // last_poll = when the router was last asked (router-cli); generated_at = when the
+      // local DB was read (older router-cli without last_poll).
+      const polled = this._data.last_poll || this._data.generated_at;
+      if (polled) parts.push(`обновлено ${this._ago(polled)}`);
       if (this._data.scan?.running) parts.push(`идёт сканирование: ${this._data.scan.running}`);
     } else if (!this._error) parts.push('Загрузка…');
     this._summary.textContent = parts.join(' · ');
@@ -390,7 +417,7 @@ class NetworkDevicesCard extends HTMLElement {
     if (!items.length && this._data) this._node('div', q ? 'Ничего не найдено' : 'Нет устройств для этого фильтра', frag, 'empty');
     this._list.replaceChildren(frag);
     const total = this._data?.devices?.length || 0;
-    this._foot.textContent = this._data ? `Показано ${items.length} из ${total}. Автообновление каждые ${Math.max(15, Number(this._config.refresh_interval) || 60)} с.` : '';
+    this._foot.textContent = this._data ? `Показано ${items.length} из ${total}. Роутер опрашивается раз в час или кнопкой «Обновить»; список перечитывается каждые ${Math.max(15, Number(this._config.refresh_interval) || 60)} с.` : '';
   }
 
   _row(d) {

@@ -1,10 +1,72 @@
 # Network devices inventory (router-cli) exposed to the network-devices Lovelace card.
 # Calls go through the host action bridge (ha-host-actions, 172.20.0.1:8787), which runs
-# `router inventory list|scan|reserve|unreserve|alias` with validated argv.
+# `router inventory list|update|scan|reserve|unreserve|alias` with validated argv.
 # The card calls these with return_response via the authenticated websocket API —
 # the inventory is never served from /local (public through the Dataplicity tunnel).
+#
+# ROUTER POLLING BUDGET (the Ubee web server hangs when polled often):
+#   - systemd user timer router-inventory-update.timer: `router inventory update` once an hour;
+#   - rest_command.network_update (card "Обновить" button, button.network_devices_update):
+#     on demand; the bridge serializes it and reuses a poll younger than 60 s.
+# Nothing else here touches the router: network_inventory and the sensors below read the
+# local inventory DB through the bridge. This replaces the old `ubee` integration.
+
+rest:
+  # Local-DB summary for automations (GET /network/summary; never polls the router).
+  - resource: !secret host_network_summary_url
+    method: GET
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    scan_interval: 300
+    timeout: 25
+    sensor:
+      - name: "Network devices online"
+        unique_id: network_devices_online
+        icon: mdi:lan-connect
+        unit_of_measurement: "devices"
+        state_class: measurement
+        value_template: "{{ value_json.online_count }}"
+        # online_macs / online_names for templates, e.g.
+        #   {{ '02:00:00:00:00:01' in state_attr('sensor.network_devices_online', 'online_macs') }}
+        json_attributes:
+          - known_count
+          - reserved_count
+          - last_poll
+          - online
+          - online_macs
+          - online_names
+          - new_24h
+      - name: "Network inventory last poll"
+        unique_id: network_inventory_last_poll
+        icon: mdi:router-network
+        device_class: timestamp
+        value_template: "{{ value_json.last_poll if value_json.last_poll else none }}"
+
+template:
+  - button:
+      - name: "Network devices update"
+        unique_id: network_devices_update
+        icon: mdi:refresh
+        press:
+          - action: rest_command.network_update
+          - action: homeassistant.update_entity
+            target:
+              entity_id:
+                - sensor.network_devices_online
+                - sensor.network_inventory_last_poll
 
 rest_command:
+  # Polls the router now (router inventory update). The bridge waits for a running poll
+  # instead of starting a second one, so the timeout covers one full poll.
+  network_update:
+    url: !secret host_network_update_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: "{}"
+    timeout: 110
+
   network_inventory:
     url: !secret host_network_inventory_url
     method: POST

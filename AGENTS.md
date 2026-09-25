@@ -183,6 +183,23 @@ The PC is a headless-ish media/HA box; these settings are load-bearing — never
   manual root `docker run` was removed on 2026-09-24); pull models via
   `docker exec homeassistant-ollama-1 ollama pull ...`.
 
+## Router (Ubee EVW32C, 192.168.0.1) — polling budget
+
+The Ubee web server hangs when it is polled often (it stopped answering at 30 s + 1 min
+polling). Router data reaches HA only through `router-cli` (`~/dev/router-cli`, command
+`router`) and its local inventory DB:
+
+- `router-inventory-update.timer` (systemd --user): `router inventory update` once an hour;
+- the "Обновить" button in the network-devices card / `button.network_devices_update`
+  → `rest_command.network_update` → bridge `POST /network/update` (serialized; a poll younger
+  than 60 s is reused);
+- `router-scan.timer` every 6 h probes the devices' web UIs (not the router).
+
+Everything else (`sensor.network_devices_online`, `sensor.network_inventory_last_poll`, the
+card's auto-refresh) reads the local DB via the bridge. Do not add integrations that poll the
+router (the old `ubee` integration was removed on 2026-09-25 for this reason). router-cli logs
+out of the router's admin session after each command (the session is open to the whole LAN).
+
 ## Home Assistant Docker management
 HA runs in Docker under `homeassistant-homeassistant-1`. All docker commands run as
 current user (no `sudo`/`run0` needed).
