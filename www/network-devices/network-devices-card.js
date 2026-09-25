@@ -1086,6 +1086,17 @@ class NetworkDevicesCard extends HTMLElement {
     if (this._drawerMac === mac) this._renderDrawer();
   }
 
+  // Isolated values (no neighbour to draw a line to) get an 8px dot so they stay visible.
+  _dots(parent, vals, max) {
+    const n = vals.length;
+    vals.forEach((v, i) => {
+      if (v === null || (i > 0 && vals[i - 1] !== null) || (i < n - 1 && vals[i + 1] !== null)) return;
+      const p = this._node('span', null, parent, 'pt');
+      p.style.left = `${(i + 0.5) / n * 100}%`;
+      p.style.top = `${(1 - v / (max || 1)) * 100}%`;
+    });
+  }
+
   _paintSpark(sp, mac) {
     const h = this._history.get(mac);
     const b = this._bucketsOf(mac);
@@ -1093,12 +1104,14 @@ class NetworkDevicesCard extends HTMLElement {
     if (!b) { sp.classList.toggle('err', !!h?.error); sp.title = h?.error ? `История недоступна: ${h.error}` : ''; return; }
     if (!b.length) { sp.title = 'Нет истории'; return; }
     const vals = b.map(x => this._num(x.online_ratio) === null ? null : Math.max(0, Math.min(1, this._num(x.online_ratio))));
-    const svg = this._svg('svg', {viewBox: `0 0 ${vals.length} 20`, preserveAspectRatio: 'none', 'aria-hidden': 'true'}, sp);
+    const box = this._node('span', null, sp, 'sbox');
+    const svg = this._svg('svg', {viewBox: `0 0 ${vals.length} 20`, preserveAspectRatio: 'none', 'aria-hidden': 'true'}, box);
     this._area(svg, vals, 1, 20);
+    this._dots(box, vals, 1);
     const avg = vals.filter(v => v !== null);
     const mean = avg.length ? Math.round(avg.reduce((a, v) => a + v, 0) / avg.length * 100) : null;
     sp.setAttribute('aria-label', `Онлайн по часам за ${this._config.history_days} дней${mean !== null ? `, в среднем ${mean}%` : ''}`);
-    this._hover(sp, vals.length, (i) => `${this._when(b[i].t)} — онлайн ${vals[i] === null ? 'нет данных' : `${Math.round(vals[i] * 100)}%`}`);
+    this._hover(box, vals.length, (i) => `${this._when(b[i].t)} — онлайн ${vals[i] === null ? 'нет данных' : `${Math.round(vals[i] * 100)}%`}`);
     if (mean !== null) this._node('span', `${mean}%`, sp, 'sv').title = 'Средняя доля времени онлайн';
   }
 
@@ -1169,6 +1182,7 @@ class NetworkDevicesCard extends HTMLElement {
     });
     const svg = this._svg('svg', {viewBox: `0 0 ${buckets.length} 100`, preserveAspectRatio: 'none', 'aria-hidden': 'true'}, plot);
     this._area(svg, vals, top, 100);
+    this._dots(plot, vals, top);
     const cross = this._node('div', null, plot, 'cross'); cross.hidden = true;
     const tbl = real.length ? `${title || ''}: максимум ${fmt(Math.max(...real))}, в среднем ${fmt(real.reduce((a, v) => a + v, 0) / real.length)}` : 'нет данных';
     plot.setAttribute('role', 'img'); plot.setAttribute('aria-label', tbl);
@@ -1204,8 +1218,20 @@ class NetworkDevicesCard extends HTMLElement {
     };
     kpi('онлайн сейчас', String(s.online_now ?? '—'));
     kpi('в среднем', this._num(s.online_avg) !== null ? this._num(s.online_avg).toFixed(1).replace('.', ',') : '—', 'Среднее число устройств онлайн по часам');
-    kpi('пик', per.length ? String(peak) : '—', 'Максимум устройств онлайн за час');
+    kpi('пик', per.some(p => this._num(p.online) !== null) ? String(Math.round(peak)) : '—', 'Максимум устройств онлайн за час (среднее по замерам внутри часа)');
     kpi('всего известно', String(this._data?.devices?.length ?? '—'));
+    const notes = [];
+    const since = this._ts(s.since);
+    if (since && Date.now() - since < this._config.history_days * 86400e3) {
+      notes.push(`История собирается с ${new Date(since).toLocaleString('ru-RU', {day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'})} — раньше данных нет.`);
+    }
+    if (notes.length) this._node('div', notes.join(' '), box, 'muted');
+    for (const c of (Array.isArray(s.ip_conflicts) ? s.ip_conflicts : []).filter(c => c && c.ip).slice(0, 5)) {
+      const names = (c.macs || []).map(m => { const d = (this._data?.devices || []).find(x => x.mac === m); return d ? `${this._name(d)} (${m})` : m; });
+      const w = this._node('div', null, box, 'conflict');
+      this._icon('mdi:alert', w);
+      this._node('span', `IP ${c.ip} переходил между устройствами: ${names.join(' и ')}${c.flips ? ` (${c.flips} раз)` : ''}. Закрепите IP за нужным устройством.`, w);
+    }
     const grid = this._node('div', null, box, 'sgrid');
     if (per.length) {
       this._chart(grid, {title: 'Устройств онлайн по часам', buckets: per,
@@ -1459,10 +1485,16 @@ const ND_CSS = `
   .stats{margin:12px 0 0;border:1px solid var(--divider-color);border-radius:12px;padding:8px 12px}
   .stats>summary{font-size:14px;font-weight:600;min-height:28px}
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:8px 0 4px}
+  .conflict{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--warning-color,#ff9800);margin-top:4px}
+  .conflict ha-icon{--mdc-icon-size:16px}
+  .conflict span{color:var(--primary-text-color)}
   .kpi{padding:6px 10px;border-radius:10px;background:var(--secondary-background-color)}
   .kv{font-size:22px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
   .kl{font-size:12px;color:var(--secondary-text-color)}
   .sgrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:8px 20px;align-items:start}
+  .sgrid>:only-child{grid-column:1 / -1}
+  .pt{position:absolute;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--primary-color);
+    box-shadow:0 0 0 2px var(--card-background-color,#fff);pointer-events:none}
   figure{margin:0}
   .chart{margin:8px 0 4px;min-width:0}
   .chart figcaption{font-size:13px;font-weight:500;margin-bottom:6px}
@@ -1531,7 +1563,8 @@ const ND_CSS = `
   .traffic ha-icon{--mdc-icon-size:14px}
   .traffic .rate{color:var(--primary-text-color)}
   .spark{position:relative;display:inline-flex;align-items:center;gap:6px;height:20px;cursor:crosshair}
-  .spark svg{width:112px;height:18px;overflow:visible;border-bottom:1px solid var(--divider-color)}
+  .sbox{position:relative;display:block;width:112px;height:18px;border-bottom:1px solid var(--divider-color)}
+  .sbox svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   .spark:empty{width:112px;border-bottom:1px dashed var(--divider-color);height:18px}
   .spark .sv{font-size:12px;font-variant-numeric:tabular-nums}
   .svcs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
