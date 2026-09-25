@@ -36,6 +36,7 @@ www/*
 !www/wakeword/
 www/wakeword/*
 !www/wakeword/wakeword-collection-card.js
+!www/wakeword/wakeword-studio-card.js
 !www/network-devices/
 www/network-devices/*
 !www/network-devices/network-devices-card.js

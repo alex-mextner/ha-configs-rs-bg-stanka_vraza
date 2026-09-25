@@ -49,6 +49,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--record-always", action="store_true", help="ignore the session file and always record")
     parser.add_argument("--min-free-gb", type=float, default=30.0, help="skip segments below this free disk space")
+    parser.add_argument(
+        "--positive-cooldown-seconds",
+        type=float,
+        default=90.0,
+        help="keep noise recording paused this long after a positive (wake phrase) session ends",
+    )
     return parser.parse_args()
 
 
@@ -70,6 +76,10 @@ class SegmentWriter:
     noise session can be started or stopped without restarting the capture
     pipeline, and a filling disk stops recording instead of starving Home Assistant.
     Skipped segments keep their timing, so the next written file starts on time.
+
+    Noise recordings must never contain the wake phrase: while a positive
+    (phrase) collection session is active, and for a cooldown after it, the
+    segment being written is discarded and recording stays paused.
     """
 
     def __init__(
@@ -82,6 +92,8 @@ class SegmentWriter:
         session_file: Path | None = None,
         record_always: bool = False,
         min_free_bytes: int = 0,
+        positive_session_file: Path | None = None,
+        positive_cooldown_seconds: float = 90.0,
     ) -> None:
         self.output_dir = output_dir
         self.sample_rate = sample_rate
@@ -96,11 +108,30 @@ class SegmentWriter:
         self.current = None
         self.skipping = False
         self.last_reason: str | None = None
+        self.current_path: Path | None = None
+        self.positive_session_file = positive_session_file
+        self.positive_cooldown_seconds = positive_cooldown_seconds
+        self.positive_block_until = 0.0
+
+    def _watch_positive_session(self) -> None:
+        if self.positive_session_file is None or not self.positive_session_file.exists():
+            return
+        self.positive_block_until = time.monotonic() + self.positive_cooldown_seconds
+        if self.current is not None:
+            path = self.current_path
+            self.current.close()
+            self.current = None
+            self.skipping = True
+            if path is not None:
+                path.unlink(missing_ok=True)
+            print(f"[wakeword-recorder] positive session active: discarded {path}", file=sys.stderr, flush=True)
 
     def _recording_allowed(self) -> bool:
         reason = None
         if not self.record_always and not session_active(self.session_file):
             reason = "no active noise session"
+        elif time.monotonic() < self.positive_block_until:
+            reason = "positive phrase session active or cooling down"
         else:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             free = shutil.disk_usage(self.output_dir).free
@@ -118,6 +149,7 @@ class SegmentWriter:
         day_dir.mkdir(parents=True, exist_ok=True)
         path = day_dir / f"{now.strftime('%H%M%S_%f')}.wav"
         self.current = path.open("w+b")
+        self.current_path = path
         self.frames_written = 0
         self.frames_since_sync = 0
         self._write_header()
@@ -163,6 +195,7 @@ class SegmentWriter:
     def write(self, data: bytes) -> None:
         if not data:
             return
+        self._watch_positive_session()
         offset = 0
         frame_bytes = self.sample_width
         total_frames = len(data) // frame_bytes
@@ -450,10 +483,28 @@ class PositiveSessionRecorder:
             "finish_reason": reason,
             "created_at": dt.datetime.now(dt.UTC).isoformat(),
             "source": "respeaker_stream_vad",
+            **self._doa_at_finish(),
         }
         path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"[wakeword-positive] captured {path}", file=sys.stderr, flush=True)
         self._reset_recording()
+
+    def _doa_at_finish(self) -> dict:
+        """Direction the phrase came from, from the XVF-3000 reader (respeaker_tuning_service.py)."""
+        if self.positive_root is None:
+            return {}
+        try:
+            doa = json.loads((self.positive_root.parent.parent / "wakeword_doa.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        trail = [int(d) for d in doa.get("speech_trail_degrees") or []]
+        if trail:
+            s = sum(math.sin(math.radians(d)) for d in trail)
+            c = sum(math.cos(math.radians(d)) for d in trail)
+            return {"doa_degrees": round(math.degrees(math.atan2(s, c))) % 360, "doa_source": "xvf3000_speech_trail"}
+        if doa.get("direction_degrees") is not None:
+            return {"doa_degrees": int(doa["direction_degrees"]), "doa_source": "xvf3000_last"}
+        return {}
 
     def _discard_clip(self, reason: str) -> None:
         duration = self.current_frames / self.sample_rate if self.sample_rate else 0.0
@@ -590,6 +641,8 @@ def main() -> int:
             session_file=args.session_file,
             record_always=args.record_always or args.session_file is None,
             min_free_bytes=int(args.min_free_gb * 1e9),
+            positive_session_file=args.positive_session_file,
+            positive_cooldown_seconds=args.positive_cooldown_seconds,
         )
     )
     status = ArrayStatusWriter(

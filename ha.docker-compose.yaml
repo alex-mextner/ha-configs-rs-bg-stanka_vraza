@@ -212,6 +212,28 @@ services:
     networks:
       - ha-net
 
+  respeaker-tuning:
+    # Reads the XMOS XVF-3000 direction-of-arrival and voice detectors over USB
+    # (scripts/respeaker_tuning_service.py). Starts as root only to open the USB
+    # device node, then drops to 1000:1000; no capabilities besides setuid/setgid.
+    build: ./docker/respeaker-tuning
+    image: respeaker-tuning:local
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    network_mode: none
+    device_cgroup_rules: ["c 189:* rwm"]
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - /home/ultra/oww-dataset:/dataset
+      - /home/ultra/homeassistant/scripts/respeaker_tuning_service.py:/app/service.py:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "2"}
+
   ollama:
     image: ollama/ollama:latest
     user: "1000:1000"

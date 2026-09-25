@@ -1,5 +1,9 @@
 # Wake word real positive collection tooling.
 
+# Authenticated backend for the Studio card (custom_components/wakeword_studio):
+# live mic/DOA state, noise session, phrase screening, phrase recording, review.
+wakeword_studio:
+
 recorder:
   exclude:
     entities:
