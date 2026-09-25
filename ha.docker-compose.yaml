@@ -41,7 +41,7 @@ services:
     # the stream server MA announces by IP; on ha-net it announced 172.20.0.10:8097, which no
     # player could reach, so nothing ever played. Only MA moves; HA stays on ha-net and reaches
     # MA at the ha-net gateway http://172.20.0.1:8095; MA reaches HA at http://127.0.0.1:8123.
-    image: ghcr.io/music-assistant/server:latest
+    image: ghcr.io/music-assistant/server:2.10.4
     user: "1000:1000"
     network_mode: host
     volumes:
