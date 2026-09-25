@@ -290,6 +290,31 @@ services:
     networks:
       - ha-net
 
+  ma-local-audio:
+    # The home laptop's own speakers as a Music Assistant player (Sendspin, name «Ноутбук»).
+    # ALSA straight to the analog card, so it keeps working while the GNOME session is down;
+    # dials out to MA on 127.0.0.1:8927 (host network, no mDNS advertisement needed).
+    # Built from the official add-on repo at a pinned commit (the image checks the player SHA).
+    build: https://github.com/music-assistant/local-audio-addon.git#a36c35317294cc087eec34bcad5f56a0b0746383
+    image: ma-local-audio:a36c35317294
+    network_mode: host
+    devices:
+      - /dev/snd:/dev/snd
+    environment:
+      SENDSPIN_NAME: Ноутбук
+      SENDSPIN_OUTPUT: plughw:CARD=sofhdadsp,DEV=0
+      SENDSPIN_SERVER: 127.0.0.1:8927
+      SENDSPIN_ID: home-laptop
+      SENDSPIN_BUFFER_MS: "250"
+    volumes:
+      - /home/ultra/ma-local-audio:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1"
+
   hga-postgres:
     # Long-term memory for Home Generative Agent (LangGraph checkpoints + pgvector store).
     # ha-net only, no published ports; password in .env (HGA_DB_PASSWORD).
