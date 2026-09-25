@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import shutil
 import struct
 import sys
 import time
@@ -41,10 +42,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--segment-seconds", type=int, default=600)
     parser.add_argument("--frames-per-read", type=int, default=1024)
     parser.add_argument("--sync-seconds", type=int, default=5)
+    parser.add_argument(
+        "--session-file",
+        type=Path,
+        help="noise-recording session JSON; segments are written only while it is active",
+    )
+    parser.add_argument("--record-always", action="store_true", help="ignore the session file and always record")
+    parser.add_argument("--min-free-gb", type=float, default=30.0, help="skip segments below this free disk space")
     return parser.parse_args()
 
 
+def session_active(session_file: Path | None) -> bool:
+    """A noise session is active when it has started and was neither completed nor stopped."""
+    if session_file is None or not session_file.exists():
+        return False
+    try:
+        session = json.loads(session_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(session.get("started_at")) and not session.get("completion_notification_sent_at") and not session.get("stopped_at")
+
+
 class SegmentWriter:
+    """Writes 60 s WAV segments while recording is allowed.
+
+    Every segment boundary re-checks the session file and free disk space, so a
+    noise session can be started or stopped without restarting the capture
+    pipeline, and a filling disk stops recording instead of starving Home Assistant.
+    Skipped segments keep their timing, so the next written file starts on time.
+    """
+
     def __init__(
         self,
         output_dir: Path,
@@ -52,15 +79,38 @@ class SegmentWriter:
         sample_width: int,
         segment_frames: int,
         sync_frames: int,
+        session_file: Path | None = None,
+        record_always: bool = False,
+        min_free_bytes: int = 0,
     ) -> None:
         self.output_dir = output_dir
         self.sample_rate = sample_rate
         self.sample_width = sample_width
         self.segment_frames = segment_frames
         self.sync_frames = sync_frames
+        self.session_file = session_file
+        self.record_always = record_always
+        self.min_free_bytes = min_free_bytes
         self.frames_written = 0
         self.frames_since_sync = 0
         self.current = None
+        self.skipping = False
+        self.last_reason: str | None = None
+
+    def _recording_allowed(self) -> bool:
+        reason = None
+        if not self.record_always and not session_active(self.session_file):
+            reason = "no active noise session"
+        else:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            free = shutil.disk_usage(self.output_dir).free
+            if free < self.min_free_bytes:
+                reason = f"free disk {free / 1e9:.1f} GB below floor {self.min_free_bytes / 1e9:.1f} GB"
+        if reason != self.last_reason:
+            state = f"paused: {reason}" if reason else "recording"
+            print(f"[wakeword-recorder] {state}", file=sys.stderr, flush=True)
+            self.last_reason = reason
+        return reason is None
 
     def _open_next(self) -> None:
         now = dt.datetime.now()
@@ -117,19 +167,22 @@ class SegmentWriter:
         frame_bytes = self.sample_width
         total_frames = len(data) // frame_bytes
         while offset < len(data):
-            if self.current is None or self.frames_written >= self.segment_frames:
+            if self.frames_written >= self.segment_frames or (self.current is None and not self.skipping):
                 self.close()
-                self._open_next()
+                self.frames_written = 0
+                self.skipping = not self._recording_allowed()
+                if not self.skipping:
+                    self._open_next()
 
             available_frames = self.segment_frames - self.frames_written
             take_frames = min(available_frames, total_frames - (offset // frame_bytes))
             take_bytes = take_frames * frame_bytes
-            chunk = data[offset : offset + take_bytes]
-            self.current.write(chunk)
+            if self.current is not None:
+                self.current.write(data[offset : offset + take_bytes])
+                self.frames_since_sync += take_frames
             self.frames_written += take_frames
-            self.frames_since_sync += take_frames
             offset += take_bytes
-            if self.frames_since_sync >= self.sync_frames:
+            if self.current is not None and self.frames_since_sync >= self.sync_frames:
                 self._sync()
 
     def close(self) -> None:
@@ -528,7 +581,16 @@ def main() -> int:
     writer = (
         NullWriter()
         if args.no_record
-        else SegmentWriter(args.output_dir, args.sample_rate, args.sample_width, segment_frames, sync_frames)
+        else SegmentWriter(
+            args.output_dir,
+            args.sample_rate,
+            args.sample_width,
+            segment_frames,
+            sync_frames,
+            session_file=args.session_file,
+            record_always=args.record_always or args.session_file is None,
+            min_free_bytes=int(args.min_free_gb * 1e9),
+        )
     )
     status = ArrayStatusWriter(
         args.status_file,
