@@ -15,6 +15,12 @@
  * Optional services (degrade gracefully when absent): rest_command.network_stats {days} → header
  * activity summary; rest_command.network_history {device, days} → sparklines and the detail drawer.
  *
+ * Copy: IP, MAC, names, vendor, hostnames and service URLs copy on click (execCommand fallback: HA is
+ *   often served over plain http, where navigator.clipboard does not exist). All text stays selectable.
+ * Pin/unpin/rename update the row at once (optimistic) and re-read the inventory; the bridge refreshes
+ *   router-cli's DB after a write. When the router's static-lease slots are full, a picker offers to
+ *   replace one reservation (rest_command.network_pin_replace; the bridge rolls back on failure).
+ *
  * Config: title, default_filter (recent|active|all|pinned|new|unknown|wifi|wired|gear),
  *         refresh_interval (s, default 60), recent_hours (24), new_hours (24), history_days (7),
  *         dry_run (bool: pin/unpin pass --dry-run to router-cli),
@@ -82,6 +88,8 @@ const ND_GALLERY = [
   ['Прочее', 'car car-electric battery solar-power devices incognito help-network'],
 ].map(([t, s]) => [t, s.split(' ').map(n => `mdi:${n}`)]);
 const ND_WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+// router-cli started recording presence sweeps here (older hours have no data, not "offline").
+const ND_PRESENCE_SINCE = Date.parse('2026-09-25T16:05:00Z');
 let ndIconList = null;   // MDI names from HA's /static/mdi/iconList.json, loaded on first gallery search
 
 class NetworkDevicesCard extends HTMLElement {
@@ -103,6 +111,7 @@ class NetworkDevicesCard extends HTMLElement {
     this._missing = new Map();   // service → when the bridge said not_found
     this._drawerMac = null;
     this._perf = {};   // timings for debugging: hass handed over, inventory call, list render (ms)
+    this._overrides = new Map();  // mac → {patch, until}: optimistic state after pin/unpin/alias
     this._visibility = () => { if (!document.hidden && Date.now() - this._loadedAt > 15000) this._load(); };
     this._keydown = (e) => { if (e.key === 'Escape' && this._drawerMac) this._closeDrawer(); };
   }
@@ -179,6 +188,52 @@ class NetworkDevicesCard extends HTMLElement {
     if (title) b.title = title;
     return b;
   }
+  // Click-to-copy: the element keeps its text selectable (a drag still selects), a plain click
+  // copies `value` (default: its text). Handled by one delegated listener in _build().
+  _cp(el, value, what = '') {
+    if (value === null || value === undefined || value === '') return el;
+    el.classList.add('cp');
+    el.dataset.copy = String(value);
+    el.tabIndex = 0;
+    el.title = [el.title, `Нажмите, чтобы скопировать${what ? ` ${what}` : ''}`].filter(Boolean).join('\n');
+    return el;
+  }
+  _selection() {
+    const s = this.shadowRoot.getSelection ? this.shadowRoot.getSelection() : document.getSelection();
+    // Chrome: shadowRoot.getSelection() sees ranges inside the card (its toString() is empty there,
+    // so check the type); other browsers fall back to the document selection.
+    return s && s.type === 'Range' && s.anchorNode ? s : null;
+  }
+  async _copyText(text) {
+    // navigator.clipboard exists only in secure contexts; HA is often opened as http://homeassistant.local.
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+    } catch (e) { /* fall through to execCommand */ }
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    const prev = document.activeElement;
+    document.body.append(ta);
+    ta.select(); ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    prev?.focus?.({preventScroll: true});
+    return ok;
+  }
+  async _copy(text) {
+    const ok = await this._copyText(text);
+    const short = text.length > 60 ? `${text.slice(0, 57)}…` : text;
+    this._toast(ok ? `Скопировано: ${short}` : `Не удалось скопировать: ${short}`);
+  }
+  _onCopyClick(e) {
+    const el = e.composedPath().find(n => n instanceof HTMLElement && n.classList.contains('cp'));
+    if (!el || (e.type === 'keydown' && e.key !== 'Enter')) return;
+    if (e.type === 'click' && this._selection()) return;   // the user is selecting text, not copying
+    e.preventDefault(); e.stopPropagation();
+    el.classList.add('copied'); setTimeout(() => el.classList.remove('copied'), 900);
+    this._copy(el.dataset.copy);
+  }
   _svg(tag, attrs, parent) {
     const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
@@ -189,6 +244,8 @@ class NetworkDevicesCard extends HTMLElement {
   _build() {
     this._built = true;
     this._node('style', ND_CSS, this.shadowRoot);
+    this.shadowRoot.addEventListener('click', (e) => this._onCopyClick(e));
+    this.shadowRoot.addEventListener('keydown', (e) => this._onCopyClick(e));
     const card = this._node('ha-card', null, this.shadowRoot);
     const head = this._node('div', null, card, 'head');
     const tb = this._node('div', null, head, 'titlebox');
@@ -281,7 +338,11 @@ class NetworkDevicesCard extends HTMLElement {
       this._perf.inventory = Math.round(performance.now() - t0);
       if (seq !== this._seq) return;
       if (this._config.mock) data = this._mockInventory(data);
+      // The server this card runs on is up by definition (its own sweep may miss itself).
+      for (const d of data.devices || []) if (d.is_self) d.online = true;
       this._data = data; this._error = ''; this._loadedAt = Date.now();
+      this._applyOverrides();
+      if (this._drawerMac && !this._selectionIn(this._drawer)) this._renderDrawer();
       this._scheduleScanPoll();
     } catch (e) {
       this._error = `Не удалось получить список устройств: ${this._errText(e)}`;
@@ -398,41 +459,116 @@ class NetworkDevicesCard extends HTMLElement {
     const m = String(e?.message || e || 'ошибка').replace(/^\w+Error\(['"]?/, '').replace(/['"]?\)$/, '')
       .replace(/^router failed \(\d+\): (router: )?/, '').split('\\n')[0];
     return ({invalid_mac: 'некорректный MAC', invalid_ip: 'некорректный IP', invalid_icon: 'иконка должна быть вида mdi:имя',
-      invalid_name: 'недопустимое имя', name_or_icon_required: 'укажите имя или иконку'})[m] || m;
+      invalid_name: 'недопустимое имя', name_or_icon_required: 'укажите имя или иконку',
+      protected_reservation: 'адрес этого сервера трогать нельзя (он прописан в конфигурации HA)',
+      not_reserved: 'у выбранного устройства уже нет резервирования — обновите список', same_device: 'это то же устройство'})[m] || m;
   }
 
   _toast(message) {
     this.dispatchEvent(new CustomEvent('hass-notification', {detail: {message}, bubbles: true, composed: true}));
   }
 
-  async _act(mac, fn, okText) {
-    this._pending.add(mac); this._renderList();
-    try {
-      const res = await fn();
-      this._confirm = null; this._editing = null;
-      this._toast(typeof okText === 'function' ? okText(res) : okText);
-      await this._load();
-    } catch (e) {
-      this._toast(`Ошибка: ${this._errText(e)}`);
-    } finally {
-      this._pending.delete(mac); this._renderList();
+  // Optimistic state: `patches` ({mac: {field: value}}) show at once and stay applied on top of
+  // re-fetched inventories until the inventory agrees (or 70 min pass: the hourly poll has run).
+  _setOverrides(patches) {
+    for (const [mac, patch] of Object.entries(patches)) this._overrides.set(mac, {patch, until: Date.now() + 70 * 60e3});
+    this._applyOverrides();
+    this._render();
+    if (this._drawerMac) this._renderDrawer();
+  }
+  _dropOverrides(macs) { for (const m of macs) this._overrides.delete(m); }
+  _applyOverrides() {
+    const devices = this._data?.devices || [];
+    for (const [mac, o] of [...this._overrides]) {
+      const d = devices.find(x => x.mac === mac);
+      if (Date.now() > o.until || !d) { if (Date.now() > o.until) this._overrides.delete(mac); continue; }
+      const same = Object.entries(o.patch).every(([k, v]) => (d[k] ?? null) === (v ?? null));
+      if (same && o.seenFresh) this._overrides.delete(mac);
+      else Object.assign(d, o.patch);
     }
   }
 
+  async _act(mac, fn, okText, patches = null) {
+    const macs = patches ? Object.keys(patches) : [mac];
+    const before = {};
+    if (patches) {
+      for (const m of macs) {
+        const d = (this._data?.devices || []).find(x => x.mac === m);
+        if (d) before[m] = Object.fromEntries(Object.keys(patches[m]).map(k => [k, d[k] ?? null]));
+      }
+    }
+    for (const m of macs) this._pending.add(m);
+    this._confirm = null; this._editing = null;
+    if (patches) this._setOverrides(patches); else this._renderList();
+    try {
+      const res = await fn();
+      const txt = typeof okText === 'function' ? okText(res) : okText;
+      // The bridge re-reads the router after a write; if that failed the list catches up at the next poll.
+      this._toast(res?.inventory?.refreshed === false ? `${txt}. Список роутера обновится при следующем опросе` : txt);
+      if (res?.dry_run) this._dropOverrides(macs);
+      // From now on the inventory is authoritative as soon as it agrees with the patch.
+      for (const m of macs) { const o = this._overrides.get(m); if (o) o.seenFresh = true; }
+    } catch (e) {
+      // Roll the optimistic change back.
+      this._dropOverrides(macs);
+      for (const [m, vals] of Object.entries(before)) {
+        const d = (this._data?.devices || []).find(x => x.mac === m);
+        if (d) Object.assign(d, vals);
+      }
+      const slots = /^slots_full:(\d+)$/.exec(String(e?.message || ''));
+      if (slots) {
+        this._pref('slots', slots[1]);
+        this._confirm = {mac, action: 'replace', capacity: Number(slots[1]), choice: null};
+        this._toast(`Все ${slots[1]} слотов статических адресов заняты — выберите, какой освободить`);
+      } else {
+        this._toast(`Ошибка: ${this._errText(e)}`);
+      }
+    } finally {
+      for (const m of macs) this._pending.delete(m);
+      this._render();
+      if (this._drawerMac) this._renderDrawer();
+    }
+    await this._load();
+  }
+
+  _leaseName(d) {
+    // Only a real device name goes to the router's lease table, never a UI placeholder.
+    return (d.hostname || (d.names || []).find(Boolean) || '').slice(0, 64);
+  }
   _pin(d) {
     const dry = !!this._config.dry_run;
-    // Only a real device name goes to the router's lease table, never a UI placeholder.
-    const leaseName = (d.hostname || (d.names || []).find(Boolean) || '').slice(0, 64);
-    this._act(d.mac, () => this._service('network_pin', {mac: d.mac, ip: d.ip, name: leaseName, dry_run: dry}),
-      dry ? `Тест (dry-run): ${d.ip} был бы закреплён за ${d.mac}` : `${d.ip} закреплён за ${this._name(d)}`);
+    this._act(d.mac, () => this._service('network_pin', {mac: d.mac, ip: d.ip, name: this._leaseName(d), dry_run: dry}),
+      dry ? `Тест (dry-run): ${d.ip} был бы закреплён за ${d.mac}` : `${d.ip} закреплён за ${this._name(d)}`,
+      dry ? null : {[d.mac]: {reserved_ip: d.ip}});
   }
   _unpin(d) {
     const dry = !!this._config.dry_run;
     this._act(d.mac, () => this._service('network_unpin', {mac: d.mac, dry_run: dry}),
-      dry ? `Тест (dry-run): резервирование ${d.mac} было бы снято` : `Резервирование для ${this._name(d)} снято`);
+      dry ? `Тест (dry-run): резервирование ${d.mac} было бы снято` : `Резервирование для ${this._name(d)} снято`,
+      dry ? null : {[d.mac]: {reserved_ip: null}});
+  }
+  _pinReplace(d, old) {
+    const dry = !!this._config.dry_run;
+    this._act(d.mac, () => this._service('network_pin_replace',
+      {replace_mac: old.mac, mac: d.mac, ip: d.ip, name: this._leaseName(d), dry_run: dry}),
+      dry ? `Тест (dry-run): ${old.reserved_ip} освободился бы, ${d.ip} закрепился бы за ${d.mac}`
+        : `${d.ip} закреплён за ${this._name(d)} вместо ${this._name(old)}`,
+      dry ? null : {[old.mac]: {reserved_ip: null}, [d.mac]: {reserved_ip: d.ip}});
   }
   _alias(d, name, icon) {
-    this._act(d.mac, () => this._service('network_alias', {mac: d.mac, name, icon}), 'Сохранено');
+    const patch = {};
+    if (name) { patch.display_name = name; if (d.friendly_name) patch.friendly_name = name; }
+    if (icon) patch.icon = icon;
+    this._act(d.mac, () => this._service('network_alias', {mac: d.mac, name, icon}), 'Сохранено', {[d.mac]: patch});
+  }
+  // Static-lease capacity: learnt from the router's "all N slots are in use" answer.
+  _slotCap() { const n = Number(this._pref('slots')); return Number.isFinite(n) && n > 0 ? n : null; }
+  _reserved() { return (this._data?.devices || []).filter(d => d.reserved_ip); }
+  _startPin(d) {
+    const cap = this._slotCap();
+    const full = cap && !d.reserved_ip && this._reserved().length >= cap;
+    this._confirm = full ? {mac: d.mac, action: 'replace', capacity: cap, choice: null} : {mac: d.mac, action: 'pin'};
+    this._editing = null; this._renderList();
   }
   async _scan(d) {
     if (d) {
@@ -454,8 +590,59 @@ class NetworkDevicesCard extends HTMLElement {
   }
 
   /* ---------- helpers ---------- */
+  // Rich name: "<product> «<user/device-given name>»", e.g. Google Chromecast HD «Гостиная».
+  // Generic: the product comes from router-cli's structured fields (product, brand + model) or its
+  // `label`; the personal name from friendly_name / display_name. The product is prefixed only when
+  // the personal name doesn't already say what the device is.
   _name(d) {
+    const own = this._ownName(d);
+    const product = this._product(d);
+    if (!product) return own || this._plainName(d);
+    if (!own) return product;
+    const lo = own.toLowerCase(), pl = product.toLowerCase();
+    const brand = String(d.brand || product.split(/\s+/)[0] || '').toLowerCase();
+    const model = String(d.model || '').toLowerCase();
+    if (lo.includes(pl) || pl.includes(lo) || (brand.length >= 3 && lo.includes(brand)) || (model.length >= 3 && lo.includes(model))) return own;
+    return `${product} «${own}»`;
+  }
+  _plainName(d) {
     return d.display_name || d.hostname || (d.names || []).find(Boolean) || d.vendor || (this._randomMac(d) ? 'Устройство с приватным MAC' : 'Неизвестное устройство');
+  }
+  _product(d) {
+    const brand = String(d.brand || '').trim(), model = String(d.model || '').trim();
+    const withBrand = (s) => (brand && s && !s.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${s}` : s);
+    if (d.product) return withBrand(String(d.product).trim());
+    if (model) return withBrand(model);
+    if (d.label) return withBrand(String(d.label).trim());
+    return brand || '';
+  }
+  // A name a person (or the device's owner) gave it — not a model string, generic word or serial.
+  _ownName(d) {
+    const cand = String(d.friendly_name || d.display_name || '').trim();
+    if (!cand) return '';
+    if (/^(tv|television|телевизор|phone|iphone|ipad|android|laptop|desktop|computer|pc|printer|speaker|camera|router|device|unknown|localhost|esp32?[-\w]*)$/i.test(cand)) return '';
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cand) || /\d{6,}/.test(cand) || /^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(cand)) return '';
+    if (d.vendor && cand.toLowerCase() === String(d.vendor).toLowerCase()) return '';
+    if (/^(device with a private mac|устройство с приватным mac)$/i.test(cand)) return '';
+    return cand;
+  }
+  // Where a piece of network gear stands (router-cli: location / placement / room).
+  _loc(d) { return String(d?.location || d?.placement || d?.room || '').trim(); }
+  // Short access-point label for topology: "Xiaomi AX3000 · Гостиная".
+  _apLabel(ap) {
+    const short = [ap.brand, ap.model].filter(Boolean).join(' ') || this._name(ap);
+    return [short, this._loc(ap)].filter(Boolean).join(' · ');
+  }
+  _viaLabel(c) {
+    if (!c) return '';
+    const ap = c.via ? (this._data?.devices || []).find(x => x.mac === c.via) : null;
+    const loc = c.via_location || (ap && this._loc(ap)) || '';
+    const base = ap ? ([ap.brand, ap.model].filter(Boolean).join(' ') || this._name(ap)) : (c.via_name || '');
+    return [base, loc].filter(Boolean).join(' · ');
+  }
+  _selectionIn(el) {
+    const s = this._selection();
+    return !!(s && el && s.anchorNode && el.contains(s.anchorNode));
   }
   _randomMac(d) {
     if (d.random_mac) return true;
@@ -497,10 +684,10 @@ class NetworkDevicesCard extends HTMLElement {
     const c = this._conn(d);
     if (!c) return null;
     const maybe = this._guessed(c) ? 'вероятно ' : '';
-    if (c.type === 'wired') return ['mdi:ethernet', [`${maybe}кабель`, c.via_name].filter(Boolean).join(' · ')];
+    if (c.type === 'wired') return ['mdi:ethernet', [`${maybe}кабель`, this._viaLabel(c)].filter(Boolean).join(' · ')];
     if (c.type === 'wifi') {
       const rssi = this._num(c.rssi) ?? NaN;
-      return [this._wifiIcon(rssi), [`${maybe}Wi‑Fi`, c.via_name, this._band(c.band), Number.isFinite(rssi) && c.rssi !== null ? `−${Math.abs(Math.round(rssi))} дБм` : '']
+      return [this._wifiIcon(rssi), [`${maybe}Wi‑Fi`, this._viaLabel(c), this._band(c.band), Number.isFinite(rssi) && c.rssi !== null ? `−${Math.abs(Math.round(rssi))} дБм` : '']
         .filter(Boolean).join(' · ')];
     }
     return null;
@@ -638,7 +825,7 @@ class NetworkDevicesCard extends HTMLElement {
     const q = this._query;
     let items = (this._data?.devices || []).filter(d => this._matches(d, this._filter) && (!this._cat || d.category === this._cat));
     if (q) items = items.filter(d => [this._name(d), d.hostname, ...(d.names || []), d.ip, d.mac, d.vendor, d.reserved_ip,
-      d.category && this._catLabel(d.category), this._conn(d)?.via_name,
+      d.category && this._catLabel(d.category), this._viaLabel(this._conn(d)), d.label, this._loc(d), ...(d.interfaces || []).flatMap(i => [i.mac, i.ip]),
       ...(d.services || []).map(s => s.title)].filter(Boolean).join(' ').toLowerCase().includes(q));
     const byName = (a, b) => this._name(a).localeCompare(this._name(b), 'ru');
     const tr = (d) => { const t = this._traffic(d); return t ? t.rx + t.tx : -1; };
@@ -685,7 +872,7 @@ class NetworkDevicesCard extends HTMLElement {
       } else {
         // Clients of an access point that is filtered out of the list.
         const ap = byMac.get(k);
-        header(k, ap ? this._name(ap) : g.clients.map(d => this._conn(d)?.via_name).find(Boolean) || k,
+        header(k, ap ? this._apLabel(ap) : g.clients.map(d => this._viaLabel(this._conn(d))).find(Boolean) || k,
           ap ? this._iconFor(ap) : 'mdi:access-point', g.clients.length, true);
       }
       for (const d of g.clients) out.push({key: d.mac, device: d, child: true});
@@ -715,14 +902,15 @@ class NetworkDevicesCard extends HTMLElement {
         make = () => this._groupHeader(it.header);
       } else {
         const d = it.device;
-        sig = JSON.stringify([d, !!it.child, it.clients ?? null, admin, this._pending.has(d.mac), this._confirm?.mac === d.mac ? this._confirm.action : '',
+        sig = JSON.stringify([d, !!it.child, it.clients ?? null, admin, this._pending.has(d.mac), this._confirm?.mac === d.mac ? [this._confirm, this._confirm.action === 'replace' ? this._reserved().map(x => [x.mac, x.reserved_ip, x.online, this._name(x)]) : 0] : '',
           this._editing === d.mac, this._open.has(d.mac), this._histReady(), this._ago(d.last_seen), this._ago(d.first_seen),
           (d.services || []).map(s => this._favicons.get(`${d.mac}|${s.port}`) || '')]);
         make = () => this._row(d, it.child, it.clients);
       }
       const prev = this._rows.get(it.key);
       // Never rebuild a row with an open editor: that would wipe a half-typed name.
-      if (prev && (prev.sig === sig || (this._editing === it.key && prev.editing))) { els.push(prev.el); continue; }
+      // ...nor one the user is selecting text in (the periodic refresh would drop the selection).
+      if (prev && (prev.sig === sig || (this._editing === it.key && prev.editing) || this._selectionIn(prev.el))) { els.push(prev.el); continue; }
       let el;
       try { el = make(); } catch (e) {
         // One device with unexpected data must not blank the whole list.
@@ -758,16 +946,20 @@ class NetworkDevicesCard extends HTMLElement {
     const busy = this._pending.has(d.mac);
     const gear = this._isGear(d);
     const row = this._node('div', null, null, `row${d.online ? '' : ' offline'}${gear ? ' gear' : ''}${child ? ' child' : ''}`);
-    const av = this._node('div', null, row, 'avatar');
+    // The avatar opens the details drawer; the name itself is click-to-copy.
+    const av = this._node('button', null, row, 'avatar');
+    av.type = 'button'; av.title = 'Подробнее: активность, трафик, интерфейсы';
+    av.setAttribute('aria-label', `Подробнее: ${this._name(d)}`);
+    av.addEventListener('click', (e) => { e.stopPropagation(); this._openDrawer(d.mac); });
     this._icon(this._iconFor(d), av);
     const dot = this._node('span', null, av, `dot${d.online ? ' on' : ''}`);
     dot.title = d.online ? 'онлайн' : 'офлайн';
     const main = this._node('div', null, row, 'main');
 
     const nm = this._node('div', null, main, 'name');
-    const nb = this._node('button', this._name(d), nm, 'nm');
-    nb.type = 'button'; nb.title = 'Подробнее: активность и трафик';
-    nb.addEventListener('click', () => this._openDrawer(d.mac));
+    const name = this._name(d);
+    this._cp(this._node('span', name, nm, 'nm'), name, 'имя');
+    if (gear && this._loc(d)) this._badge(nm, this._loc(d), 'mdi:map-marker', 'gearb', 'Где стоит');
     if (d.is_self) this._badge(nm, 'этот сервер', 'mdi:home-assistant', 'gearb', 'Компьютер, на котором работает Home Assistant');
     if (gear) this._badge(nm, 'сетевое оборудование', 'mdi:router-wireless', 'gearb', 'Роутер, mesh‑узел или точка доступа');
     if (clients) this._badge(nm, `${clients} ${this._plural(clients, 'клиент', 'клиента', 'клиентов')}`, 'mdi:devices', '', 'Устройства, подключённые через эту точку доступа (показаны ниже)');
@@ -775,7 +967,7 @@ class NetworkDevicesCard extends HTMLElement {
     if (d.category) {
       const conf = this._conf(d);
       this._badge(nm, `${this._catLabel(d.category)}${conf !== null ? ` · ${conf}%` : ''}`, null, 'cat',
-        `Категория определена автоматически${conf !== null ? `, уверенность ${conf}%` : ''}`);
+        `Категория определена автоматически${conf !== null ? `, уверенность ${conf}%` : ''}${d.label ? `\nОпознано как: ${d.label}` : ''}`);
     }
     if (this._randomMac(d)) {
       this._badge(nm, 'приватный MAC', 'mdi:incognito', '',
@@ -783,33 +975,44 @@ class NetworkDevicesCard extends HTMLElement {
     }
 
     const l1 = this._node('div', null, main, 'line');
-    this._node('span', d.ip || '—', l1, 'mono ip');
+    if (d.ip) this._cp(this._node('span', d.ip, l1, 'mono ip'), d.ip, 'IP');
+    else this._node('span', '—', l1, 'mono ip');
     if (d.reserved_ip && d.reserved_ip === d.ip) this._badge(l1, 'закреплён', 'mdi:pin', 'pin');
-    else if (d.reserved_ip) this._badge(l1, `IP изменился: закреплён ${d.reserved_ip}`, 'mdi:alert', 'warn');
+    else if (d.reserved_ip) this._cp(this._badge(l1, `закреплён ${d.reserved_ip}${d.ip ? ', сейчас другой IP' : ''}`, 'mdi:alert', 'warn'), d.reserved_ip, 'закреплённый IP');
     const ct = this._connText(d);
     if (ct) {
       const c = this._conn(d);
       const guess = this._guessed(c);
       this._badge(l1, ct[1], ct[0], `conn${c.type === 'wifi' ? '' : ' wired'}${guess ? ' guess' : ''}`,
         guess ? `Тип подключения предположен по типу устройства (роутер не сообщает, кто подключён по Wi‑Fi, а кто кабелем)`
-          : c.type === 'wifi' ? `Wi‑Fi через ${c.via_name || c.via || 'точку доступа'}${this._num(c.rssi) !== null ? `, уровень сигнала ${c.rssi} дБм` : ''}` : 'Подключено кабелем');
+          : c.type === 'wifi' ? `Wi‑Fi через ${this._viaLabel(c) || c.via || 'точку доступа'}${this._num(c.rssi) !== null ? `, уровень сигнала ${c.rssi} дБм` : ''}` : 'Подключено кабелем');
     }
     // router-cli gives [{ip, first_seen, last_seen}]; accept plain strings too.
     const prev = (d.ip_history || []).map(h => typeof h === 'string' ? h : h?.ip).filter(ip => ip && ip !== d.ip);
     if (prev.length) this._node('span', `ранее: ${[...new Set(prev)].slice(-3).join(', ')}`, l1).title = 'История IP';
 
     const l2 = this._node('div', null, main, 'line');
-    this._node('span', d.mac, l2, 'mono');
-    if (d.vendor) this._node('span', d.vendor, l2);
+    this._cp(this._node('span', d.mac, l2, 'mono'), d.mac, 'MAC');
+    if (d.vendor) this._cp(this._node('span', d.vendor, l2), d.vendor, 'производителя');
+    if (d.hostname && d.hostname !== name && !name.includes(d.hostname)) {
+      const h = this._cp(this._node('span', d.hostname, l2, 'mono host'), d.hostname, 'имя хоста');
+      h.title = `Имя хоста (DHCP/mDNS)\n${h.title}`;
+    }
     if (d.same_device_as) {
       const other = (this._data?.devices || []).find(x => x.mac === d.same_device_as);
       this._badge(l2, `тот же, что ${other ? this._name(other) : d.same_device_as}`, 'mdi:link-variant', '',
         `Это другой сетевой интерфейс того же устройства (${d.same_device_as}${other?.ip ? `, ${other.ip}` : ''})`);
     }
-    if (!ct && d.interface) this._node('span', d.interface === 'lan' ? 'LAN' : d.interface, l2).title = 'Интерфейс по данным роутера';
+    const ifs = this._ifaces(d);
+    if (!ct && d.interface && ifs.length < 2) this._node('span', d.interface === 'lan' ? 'LAN' : d.interface, l2).title = 'Интерфейс по данным роутера';
+    if (ifs.length > 1) {
+      const box = this._node('div', null, main, 'ifs');
+      box.setAttribute('aria-label', 'Сетевые интерфейсы устройства');
+      for (const i of ifs) this._ifaceChip(box, i);
+    }
 
     const l3 = this._node('div', null, main, 'line');
-    this._node('span', d.online ? 'онлайн' : `был ${this._ago(d.last_seen)}`, l3).title = d.last_seen ? new Date(this._ts(d.last_seen)).toLocaleString('ru-RU') : '';
+    this._node('span', d.is_self ? 'онлайн (этот сервер)' : d.online ? 'онлайн' : `был ${this._ago(d.last_seen)}`, l3).title = d.last_seen ? new Date(this._ts(d.last_seen)).toLocaleString('ru-RU') : '';
     this._node('span', `впервые ${this._ago(d.first_seen)}`, l3).title = d.first_seen ? new Date(this._ts(d.first_seen)).toLocaleString('ru-RU') : '';
     const tr = this._traffic(d);
     if (tr) {
@@ -841,16 +1044,16 @@ class NetworkDevicesCard extends HTMLElement {
     if (admin) {
       const pinned = d.reserved_ip && d.reserved_ip === d.ip;
       if (!pinned && d.ip && this._pinnable(d)) {
-        const b = this._button(d.reserved_ip ? 'Перезакрепить' : 'Закрепить IP', 'mdi:pin-outline', acts, '',
-          () => { this._confirm = {mac: d.mac, action: 'pin'}; this._editing = null; this._renderList(); });
+        const b = this._button(d.reserved_ip ? 'Перезакрепить' : 'Закрепить IP', 'mdi:pin-outline', acts, busy ? 'spin' : '', () => this._startPin(d));
         b.title = `Зарезервировать ${d.ip} за ${d.mac} в DHCP роутера`; b.disabled = busy;
       }
       if (d.reserved_ip) {
         const b = this._button('', 'mdi:pin-off-outline', acts, 'icon',
           () => { this._confirm = {mac: d.mac, action: 'unpin'}; this._editing = null; this._renderList(); });
-        b.title = 'Снять резервирование'; b.setAttribute('aria-label', 'Снять резервирование'); b.disabled = busy;
+        b.title = 'Снять резервирование'; b.setAttribute('aria-label', 'Снять резервирование'); b.disabled = busy || !!d.is_self;
+        if (d.is_self) b.title = 'Адрес этого сервера прописан в конфигурации HA — не снимать';
       }
-      const sc = this._button('', 'mdi:web-refresh', acts, `icon${busy ? ' spin' : ''}`, () => this._scan(d));
+      const sc = this._button('', 'mdi:web-refresh', acts, 'icon', () => this._scan(d));
       sc.title = 'Проверить веб-интерфейсы'; sc.setAttribute('aria-label', 'Проверить веб-интерфейсы'); sc.disabled = busy || !d.ip;
       const ed = this._button('', 'mdi:pencil', acts, 'icon',
         () => { this._editing = this._editing === d.mac ? null : d.mac; this._confirm = null; this._renderList(); });
@@ -864,9 +1067,26 @@ class NetworkDevicesCard extends HTMLElement {
     return row;
   }
 
+  // All network interfaces of a device (router-cli folds multi-MAC devices into one entry).
+  _ifaces(d) {
+    const list = (Array.isArray(d.interfaces) ? d.interfaces : []).filter(i => i && i.mac);
+    return list.length ? list : [{mac: d.mac, ip: d.ip, online: d.online, name: null, type: this._connType(d) || 'unknown'}];
+  }
+  _ifaceChip(box, i) {
+    const chip = this._node('span', null, box, `iface${i.online ? '' : ' off'}`);
+    const icon = i.type === 'wifi' ? 'mdi:wifi' : i.type === 'wired' ? 'mdi:ethernet' : 'mdi:lan';
+    this._icon(icon, chip).title = i.type === 'wifi' ? 'Wi‑Fi' : i.type === 'wired' ? 'кабель' : 'тип неизвестен';
+    if (i.name) this._node('span', i.name, chip, 'in');
+    this._cp(this._node('span', i.mac, chip, 'mono'), i.mac, 'MAC');
+    if (i.ip) this._cp(this._node('span', i.ip, chip, 'mono'), i.ip, 'IP');
+    chip.title = `${i.online ? 'онлайн' : 'офлайн'}`;
+    return chip;
+  }
+
   _svcChip(box, d, s, url) {
     const health = this._svcHealth(s);
-    const a = this._node('a', null, box, `svc ${health}`);
+    const wrap = this._node('span', null, box, 'svcw');
+    const a = this._node('a', null, wrap, `svc ${health}`);
     a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
     const code = Number(s.http_status);
     const state = health === 'down' ? `Недоступен${s.error ? `: ${s.error}` : ''}`
@@ -880,6 +1100,10 @@ class NetworkDevicesCard extends HTMLElement {
     else this._icon(s.scheme === 'https' ? 'mdi:web-check' : 'mdi:web', a);
     this._node('span', (s.title || '').trim() || s.server || (s.scheme || 'http').toUpperCase(), a, 't');
     this._node('span', `:${s.port}`, a, 'p');
+    const cb = this._node('button', null, wrap, 'svccp cp');
+    cb.type = 'button'; cb.dataset.copy = url;
+    cb.title = `Скопировать адрес: ${url}`; cb.setAttribute('aria-label', `Скопировать ${url}`);
+    this._icon('mdi:content-copy', cb);
   }
 
   _why(main, d) {
@@ -924,6 +1148,7 @@ class NetworkDevicesCard extends HTMLElement {
   }
 
   _confirmPanel(d, row, busy) {
+    if (this._confirm.action === 'replace') { this._replacePanel(d, row, busy); return; }
     const p = this._node('div', null, row, 'panel');
     const pin = this._confirm.action === 'pin';
     const dry = this._config.dry_run ? ' (тест, --dry-run)' : '';
@@ -937,14 +1162,68 @@ class NetworkDevicesCard extends HTMLElement {
     if (!busy) requestAnimationFrame(() => yes.focus());
   }
 
+  // Why a reservation is a good one to give up (higher score = better candidate).
+  _replaceScore(r, all) {
+    const reasons = [];
+    let score = 0;
+    if (r.is_self) return {score: -1, reasons: ['этот сервер — не трогать'], blocked: true};
+    const offH = r.online ? 0 : Math.max(0, (Date.now() - this._ts(r.last_seen)) / 3600e3);
+    if (!r.online) { score += 10 + Math.min(offH, 24 * 30); reasons.push(r.last_seen ? `офлайн ${this._ago(r.last_seen).replace(' назад', '')}` : 'офлайн, когда — неизвестно'); }
+    if (!r.ip) { score += 20; reasons.push('нет текущего IP'); }
+    else if (r.ip !== r.reserved_ip) { score += 30; reasons.push(`сейчас ${r.ip} — резерв не используется`); }
+    if (!r.category || r.category === 'unknown' || !this._ownName(r) && !r.label) { score += 8; reasons.push('неизвестное устройство'); }
+    const dup = r.same_device_as || all.some(o => o !== r && ((o.interfaces || []).some(i => i.mac === r.mac) || this._name(o) === this._name(r)));
+    if (dup) { score += 25; reasons.push('дубликат: у устройства несколько резервов'); }
+    return {score, reasons};
+  }
+
+  _replacePanel(d, row, busy) {
+    const p = this._node('div', null, row, 'panel replace');
+    const all = this._reserved().filter(r => r.mac !== d.mac);
+    const cap = this._confirm.capacity || all.length;
+    const choice = all.find(r => r.mac === this._confirm.choice);
+    const dry = this._config.dry_run ? ' (тест, --dry-run)' : '';
+    if (choice) {
+      // Step 2: confirm the swap.
+      this._node('div', `Снять резервирование ${choice.reserved_ip} с «${this._name(choice)}» (${choice.mac}) и закрепить ${d.ip} за «${this._name(d)}» (${d.mac})?${dry}`, p, 'grow');
+      this._node('div', 'Если новое резервирование не получится, старое будет восстановлено.', p, 'muted full');
+      const yes = this._button('Заменить', 'mdi:swap-horizontal', p, 'primary', () => this._pinReplace(d, choice));
+      yes.disabled = busy;
+      this._button('Назад', 'mdi:arrow-left', p, '', () => { this._confirm = {...this._confirm, choice: null}; this._renderList(); });
+      this._button('Отмена', null, p, '', () => { this._confirm = null; this._renderList(); });
+      if (!busy) requestAnimationFrame(() => yes.focus());
+      return;
+    }
+    this._node('div', `Все ${cap} слотов статических адресов заняты — заменить:`, p, 'rtitle full');
+    const scored = all.map(r => ({r, ...this._replaceScore(r, all)})).sort((a, b) => b.score - a.score);
+    const best = new Set(scored.filter(x => x.score >= 10 && !x.blocked).slice(0, 2).map(x => x.r.mac));
+    const ul = this._node('div', null, p, 'rlist full');
+    ul.setAttribute('role', 'listbox'); ul.setAttribute('aria-label', 'Какое резервирование освободить');
+    for (const {r, reasons, blocked} of scored) {
+      const b = this._node('button', null, ul, `ropt${best.has(r.mac) ? ' best' : ''}`);
+      b.type = 'button'; b.setAttribute('role', 'option'); b.disabled = !!blocked || busy;
+      const av = this._node('span', null, b, 'avatar sm');
+      this._icon(this._iconFor(r), av);
+      this._node('span', null, av, `dot${r.online ? ' on' : ''}`);
+      const t = this._node('span', null, b, 'rt');
+      this._node('span', this._name(r), t, 'rn');
+      this._node('span', [r.reserved_ip, r.mac, r.online ? 'онлайн' : r.last_seen ? `был ${this._ago(r.last_seen)}` : 'в сети не замечен'].join(' · '), t, 'rm mono');
+      if (reasons.length) this._node('span', reasons.join(' · '), t, 'rr');
+      if (best.has(r.mac)) this._badge(b, 'лучше заменить', 'mdi:thumb-up-outline', 'new');
+      b.addEventListener('click', (e) => { e.stopPropagation(); this._confirm = {...this._confirm, choice: r.mac}; this._renderList(); });
+    }
+    if (!all.length) this._node('div', 'Резервирований в списке нет — обновите данные роутера кнопкой «Обновить».', p, 'muted full');
+    this._button('Отмена', null, p, '', () => { this._confirm = null; this._renderList(); });
+  }
+
   _editPanel(d, row, busy) {
     const p = this._node('div', null, row, 'panel');
     const name = this._node('input', null, p, 'grow');
-    name.value = this._name(d); name.maxLength = 64; name.placeholder = 'Имя'; name.setAttribute('aria-label', 'Имя устройства');
+    const origName = d.friendly_name || d.display_name || this._plainName(d);
+    name.value = origName; name.maxLength = 64; name.placeholder = 'Имя'; name.setAttribute('aria-label', 'Имя устройства');
     // Only a real icon from router-cli counts as the current value; the client-side guess is just
     // shown, so a plain rename doesn't freeze the heuristic icon as a permanent override.
     const origIcon = ND_MDI.test(d.icon || '') && d.icon === this._iconFor(d) ? d.icon : '';
-    const origName = this._name(d);
     let chosen = origIcon;
     const wrap = this._node('div', null, p, 'pickwrap');
     const pickBtn = this._button('', null, wrap, 'pick', () => this._gallery(wrap, pickBtn, chosen, (v) => {
@@ -1106,13 +1385,31 @@ class NetworkDevicesCard extends HTMLElement {
     const vals = b.map(x => this._num(x.online_ratio) === null ? null : Math.max(0, Math.min(1, this._num(x.online_ratio))));
     const box = this._node('span', null, sp, 'sbox');
     const svg = this._svg('svg', {viewBox: `0 0 ${vals.length} 20`, preserveAspectRatio: 'none', 'aria-hidden': 'true'}, box);
+    this._gaps(svg, vals, 20);
     this._area(svg, vals, 1, 20);
     this._dots(box, vals, 1);
     const avg = vals.filter(v => v !== null);
     const mean = avg.length ? Math.round(avg.reduce((a, v) => a + v, 0) / avg.length * 100) : null;
     sp.setAttribute('aria-label', `Онлайн по часам за ${this._config.history_days} дней${mean !== null ? `, в среднем ${mean}%` : ''}`);
-    this._hover(box, vals.length, (i) => `${this._when(b[i].t)} — онлайн ${vals[i] === null ? 'нет данных' : `${Math.round(vals[i] * 100)}%`}`);
+    this._hover(box, vals.length, (i) => `${this._when(b[i].t)} — онлайн ${vals[i] === null ? this._noData(b[i]) : `${Math.round(vals[i] * 100)}%`}${this._samples(b[i], vals[i])}`);
     if (mean !== null) this._node('span', `${mean}%`, sp, 'sv').title = 'Средняя доля времени онлайн';
+  }
+
+  // Hours without any presence sweep (online_ratio/online null) are hatched, so a gap reads as
+  // "not measured", never as "offline".
+  _gaps(svg, vals, H) {
+    let start = -1;
+    const flush = (end) => { if (start >= 0) this._svg('rect', {x: start, y: 0, width: end - start, height: H, class: 'nd'}, svg); start = -1; };
+    vals.forEach((v, i) => { if (v === null) { if (start < 0) start = i; } else flush(i); });
+    flush(vals.length);
+  }
+  _noData(b) {
+    const since = this._ts(this._stats?.since) || ND_PRESENCE_SINCE;
+    return this._tms(b?.t) + 3600e3 <= since ? 'нет данных (история ещё не собиралась)' : 'нет данных (замеров не было)';
+  }
+  _samples(b, v) {
+    const n = this._num(b?.samples);
+    return n !== null && v !== null ? ` · ${n} ${this._plural(n, 'замер', 'замера', 'замеров')}` : '';
   }
 
   // Area + 2px line; null values break the path (no data ≠ zero).
@@ -1181,12 +1478,13 @@ class NetworkDevicesCard extends HTMLElement {
       }
     });
     const svg = this._svg('svg', {viewBox: `0 0 ${buckets.length} 100`, preserveAspectRatio: 'none', 'aria-hidden': 'true'}, plot);
+    this._gaps(svg, vals, 100);
     this._area(svg, vals, top, 100);
     this._dots(plot, vals, top);
     const cross = this._node('div', null, plot, 'cross'); cross.hidden = true;
     const tbl = real.length ? `${title || ''}: максимум ${fmt(Math.max(...real))}, в среднем ${fmt(real.reduce((a, v) => a + v, 0) / real.length)}` : 'нет данных';
     plot.setAttribute('role', 'img'); plot.setAttribute('aria-label', tbl);
-    this._hover(plot, buckets.length, (i) => `${this._when(buckets[i].t)} — ${tipLabel}: ${vals[i] === null ? 'нет данных' : fmt(vals[i], true)}`, cross);
+    this._hover(plot, buckets.length, (i) => `${this._when(buckets[i].t)} — ${tipLabel}: ${vals[i] === null ? this._noData(buckets[i]) : fmt(vals[i], true)}${this._samples(buckets[i], vals[i])}`, cross);
     return box;
   }
 
@@ -1265,7 +1563,7 @@ class NetworkDevicesCard extends HTMLElement {
 
   /* ---------- device drawer ---------- */
   _openDrawer(mac) {
-    this._drawerMac = mac; this._drawerFrom = this.shadowRoot.activeElement;
+    this._drawerMac = mac; this._drawerFrom = this.shadowRoot.activeElement; this._drawerFocus = true;
     this._wantHistory(mac);
     this._renderDrawer();
   }
@@ -1289,14 +1587,29 @@ class NetworkDevicesCard extends HTMLElement {
     this._icon(this._iconFor(d), av);
     this._node('span', null, av, `dot${d.online ? ' on' : ''}`);
     const ttl = this._node('div', null, hd, 'dtitle');
-    this._node('div', this._name(d), ttl, 'name');
-    this._node('div', [d.ip, d.mac, d.vendor].filter(Boolean).join(' · '), ttl, 'muted mono');
+    this._cp(this._node('div', this._name(d), ttl, 'name'), this._name(d), 'имя');
+    const sub = this._node('div', null, ttl, 'muted mono dsub');
+    for (const [v, what] of [[d.ip, 'IP'], [d.mac, 'MAC'], [d.vendor, 'производителя']]) if (v) this._cp(this._node('span', v, sub), v, what);
     const x = this._button('', 'mdi:close', hd, 'icon', () => this._closeDrawer());
     x.setAttribute('aria-label', 'Закрыть'); x.title = 'Закрыть (Esc)';
 
     const facts = this._node('div', null, dr, 'facts');
-    const fact = (k, v, icon) => { if (!v) return; const r = this._node('div', null, facts, 'fact'); if (icon) this._icon(icon, r); this._node('span', k, r, 'k'); this._node('span', v, r, 'v'); };
-    fact('Статус', d.online ? 'онлайн' : `офлайн, был ${this._ago(d.last_seen)}`, d.online ? 'mdi:lan-connect' : 'mdi:lan-disconnect');
+    const fact = (k, v, icon, copy) => {
+      if (!v) return null;
+      const r = this._node('div', null, facts, 'fact'); this._icon(icon || 'mdi:circle-small', r);
+      this._node('span', k, r, 'k');
+      const val = this._node('span', v, r, 'v');
+      if (copy) this._cp(val, copy === true ? v : copy, k.toLowerCase());
+      return r;
+    };
+    fact('Статус', d.is_self ? 'онлайн (этот сервер)' : d.online ? 'онлайн' : `офлайн, был ${this._ago(d.last_seen)}`, d.online ? 'mdi:lan-connect' : 'mdi:lan-disconnect');
+    fact('Имя хоста', d.hostname, 'mdi:dns', true);
+    if (d.label && d.label !== this._name(d)) fact('Опознано как', d.label, 'mdi:tag-outline', true);
+    const product = [d.brand, d.model].filter(Boolean).join(' ') || d.product;
+    if (product) fact('Модель', product, 'mdi:information-outline', true);
+    fact('Где стоит', this._loc(d), 'mdi:map-marker', true);
+    const other = (d.names || []).filter(n => n && n !== d.hostname && n !== this._name(d));
+    if (other.length) fact('Другие имена', [...new Set(other)].slice(0, 4).join(', '), 'mdi:tag-multiple-outline', true);
     const ct = this._connText(d);
     if (ct) fact('Подключение', ct[1], ct[0]);
     if (d.category) fact('Категория', `${this._catLabel(d.category)}${this._conf(d) !== null ? ` · уверенность ${this._conf(d)}%` : ''}`, 'mdi:shape-outline');
@@ -1307,8 +1620,15 @@ class NetworkDevicesCard extends HTMLElement {
       if (rate) fact('Сейчас', `↓ ${this._rate(tr.rxr) || '0'} · ↑ ${this._rate(tr.txr) || '0'}`, 'mdi:speedometer');
     }
     fact('Впервые', d.first_seen ? new Date(this._ts(d.first_seen)).toLocaleString('ru-RU') : '', 'mdi:calendar-start');
-    if (d.reserved_ip) fact('DHCP', `закреплён ${d.reserved_ip}`, 'mdi:pin');
+    if (d.reserved_ip) fact('DHCP', `закреплён ${d.reserved_ip}`, 'mdi:pin', d.reserved_ip);
     else if (!this._pinnable(d)) fact('DHCP', 'приватный MAC — закреплять IP бесполезно', 'mdi:incognito');
+
+    const ifs = this._ifaces(d);
+    if (ifs.length > 1 || ifs[0]?.name) {
+      this._node('div', `Сетевые интерфейсы (${ifs.length})`, dr, 'dsec');
+      const box = this._node('div', null, dr, 'ifs col');
+      for (const i of ifs) this._ifaceChip(box, i);
+    }
 
     const h = this._history.get(d.mac);
     const b = this._bucketsOf(d.mac);
@@ -1317,6 +1637,10 @@ class NetworkDevicesCard extends HTMLElement {
     else if (!b) this._node('div', h?.error ? `История недоступна: ${h.error}` : 'Загрузка истории…', charts, 'muted');
     else if (!b.length) this._node('div', 'Истории пока нет.', charts, 'muted');
     else {
+      const since = this._ts(this._stats?.since) || ND_PRESENCE_SINCE;
+      if (b.length && this._tms(b[0].t) < since) {
+        this._node('div', `История присутствия собирается с ${new Date(since).toLocaleString('ru-RU', {day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'})}; заштрихованные часы — нет данных, а не «офлайн».`, charts, 'muted');
+      }
       this._chart(charts, {title: 'Онлайн, % времени в час', buckets: b, max: 1,
         value: (x) => this._num(x.online_ratio) === null ? null : Math.max(0, Math.min(1, this._num(x.online_ratio))),
         fmt: (v) => `${Math.round(v * 100)}%`, tipLabel: 'онлайн'});
@@ -1343,10 +1667,10 @@ class NetworkDevicesCard extends HTMLElement {
     if (ips.length > 1) {
       this._node('div', 'История IP', dr, 'dsec');
       const ul = this._node('ul', null, dr, 'iph');
-      for (const v of ips.slice(-8).reverse()) this._node('li', `${v.ip} — ${this._ago(v.last_seen)}`, ul, 'mono');
+      for (const v of ips.slice(-8).reverse()) { const li = this._node('li', null, ul, 'mono'); this._cp(this._node('span', v.ip, li), v.ip, 'IP'); this._node('span', ` — ${this._ago(v.last_seen)}`, li); }
     }
     dr.scrollTop = scroll;
-    if (!scroll) requestAnimationFrame(() => x.focus());
+    if (this._drawerFocus) { this._drawerFocus = false; requestAnimationFrame(() => x.focus()); }
   }
 
   /* ---------- mock (config mock: true) ---------- */
@@ -1441,7 +1765,7 @@ class NetworkDevicesCard extends HTMLElement {
 }
 
 const ND_CSS = `
-  :host{display:block;container-type:inline-size;--nd-tx:color-mix(in srgb,var(--primary-color) 40%,var(--card-background-color,#fff))}
+  :host{display:block;container-type:inline-size;--nd-copy:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z%27/%3E%3C/svg%3E");--nd-tx:color-mix(in srgb,var(--primary-color) 40%,var(--card-background-color,#fff))}
   ha-card{padding:16px 16px 8px;overflow:hidden}
   ha-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;--mdc-icon-size:18px;width:var(--mdc-icon-size);height:var(--mdc-icon-size);line-height:0}
   .head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
@@ -1544,9 +1868,9 @@ const ND_CSS = `
   .dot.on{background:var(--success-color,#43a047)}
   .main{min-width:0}
   .name{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-height:24px}
-  .nm{font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:anywhere;text-align:left;min-height:0;padding:0;border:0;border-radius:4px;
+  .nm{font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:anywhere;
     background:none;color:var(--primary-text-color)}
-  .nm:hover{background:none;text-decoration:underline;text-decoration-color:var(--divider-color)}
+
   .line{font-size:13px;line-height:20px;color:var(--secondary-text-color);display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;margin-top:2px}
   .line>span{display:inline-flex;align-items:center;gap:4px}
   .ip{color:var(--primary-text-color);font-size:13.5px}
@@ -1611,6 +1935,45 @@ const ND_CSS = `
   .empty{padding:24px 4px;text-align:center;color:var(--secondary-text-color)}
   .more{margin:8px auto 0;display:flex}
   .foot{padding:8px 4px 4px;font-size:12px;color:var(--secondary-text-color)}
+  /* Text is selectable everywhere (HA's hui-root sets user-select:none on the whole view). */
+  ha-card,.drawer,.tip{user-select:text;-webkit-user-select:text}
+  button,summary,.chips,.gallery{user-select:none;-webkit-user-select:none}
+  /* Click-to-copy values: dotted underline + copy glyph on hover, flash when copied. */
+  .cp{cursor:copy;position:relative;border-radius:3px;text-decoration:underline dotted transparent;text-underline-offset:3px;
+    transition:background-color .15s,text-decoration-color .15s}
+  .cp:hover,.cp:focus-visible{text-decoration-color:currentColor;background:rgba(var(--rgb-primary-color,3,169,244),.08)}
+  span.cp::after,div.cp::after{content:'';display:inline-block;width:12px;height:12px;margin-left:3px;vertical-align:-1px;background:currentColor;opacity:0;
+    -webkit-mask:var(--nd-copy) center/contain no-repeat;mask:var(--nd-copy) center/contain no-repeat;transition:opacity .15s}
+  span.cp:hover::after,div.cp:hover::after,.cp:focus-visible::after{opacity:.6}
+  .cp.copied{background:rgba(var(--rgb-success-color,67,160,71),.2)}
+  .badge.cp::after{display:none}
+  button.avatar{padding:0;min-height:0;border:0;cursor:pointer}
+  button.avatar:hover{background:rgba(var(--rgb-primary-color,3,169,244),.15)}
+  .avatar.sm{width:30px;height:30px}
+  .avatar.sm ha-icon{--mdc-icon-size:18px}
+  .avatar.sm .dot{width:9px;height:9px}
+  .host{color:var(--secondary-text-color)}
+  .ifs{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px;font-size:12.5px}
+  .ifs.col{flex-direction:column;align-items:flex-start;margin-bottom:6px}
+  .iface{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:10px;border:1px solid var(--divider-color);color:var(--primary-text-color)}
+  .iface ha-icon{--mdc-icon-size:14px;color:var(--secondary-text-color)}
+  .iface .in{color:var(--secondary-text-color)}
+  .iface.off{opacity:.6}
+  .svcw{display:inline-flex;align-items:center;max-width:100%}
+  button.svccp{min-height:0;width:24px;height:24px;padding:0;margin-left:2px;border:0;border-radius:12px;background:none;color:var(--secondary-text-color);opacity:.55}
+  .svcw:hover button.svccp,button.svccp:focus-visible{opacity:1}
+  button.svccp ha-icon{--mdc-icon-size:14px}
+  .nd{fill:var(--secondary-text-color);fill-opacity:.08}
+  .dsub{display:flex;flex-wrap:wrap;gap:2px 10px}
+  .panel .full{flex-basis:100%}
+  .rtitle{font-weight:600}
+  .rlist{display:flex;flex-direction:column;gap:4px}
+  button.ropt{display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;min-height:44px;padding:6px 10px;border-radius:10px;text-align:left}
+  button.ropt.best{border-color:var(--success-color,#43a047);background:rgba(var(--rgb-success-color,67,160,71),.08)}
+  .rt{display:flex;flex-direction:column;min-width:0;flex:1}
+  .rn{font-weight:600}
+  .rm{font-size:12px;color:var(--secondary-text-color)}
+  .rr{font-size:12px;color:var(--warning-color,#ff9800)}
   :focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}
 
   .tip{position:fixed;z-index:20;pointer-events:none;padding:4px 8px;border-radius:6px;font-size:12px;line-height:1.4;white-space:nowrap;
