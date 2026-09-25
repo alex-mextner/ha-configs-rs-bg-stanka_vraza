@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "YT Music → Music Assistant",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Одна кнопка: копирует cookie music.youtube.com для провайдера YouTube Music в Music Assistant.",
   "permissions": ["cookies", "clipboardWrite"],
-  "host_permissions": ["https://music.youtube.com/*"],
+  "host_permissions": ["https://*.youtube.com/*"],
   "action": { "default_popup": "popup.html", "default_title": "Cookie для Music Assistant" }
 }

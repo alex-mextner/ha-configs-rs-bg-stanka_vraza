@@ -4,7 +4,10 @@ const status = (html) => { document.getElementById("status").innerHTML = html; }
 
 document.getElementById("copy").addEventListener("click", async () => {
   try {
-    const cookies = await chrome.cookies.getAll({ url: "https://music.youtube.com/" });
+    // Auth cookies (SAPISID, __Secure-3PAPISID, ...) live on .youtube.com, so query the domain;
+    // the host permission for *.youtube.com is what lets the extension read them.
+    const cookies = (await chrome.cookies.getAll({ domain: "youtube.com" }))
+      .filter((c) => c.domain === ".youtube.com" || c.domain === "youtube.com" || c.domain.endsWith("music.youtube.com"));
     const signedIn = cookies.some((c) => c.name === "SAPISID" || c.name === "__Secure-3PAPISID");
     if (!signedIn) {
       status("Вы не вошли в YouTube Music в этом профиле Chrome. Откройте <b>music.youtube.com</b>, войдите в аккаунт с Premium и нажмите снова.");
