@@ -67,7 +67,7 @@ ingress:
         path: .*/transmission-app\.js(\?.*)?$
         name: application/javascript
         match: '_Root:"\.\./rpc"'
-        replace: '_Root:"/api/ingress/t-05ed74a62475c41b58cec6aa74d00f31c86e665498b7b8c1/transmission/rpc"'
+        replace: !secret transmission_rpc_rewrite
   k1_se_printer:
     require_admin: true
     title: K1 SE

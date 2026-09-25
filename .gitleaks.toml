@@ -2,6 +2,12 @@
 [extend]
 useDefault = true
 
+[[rules]]
+id = "ha-ingress-static-token"
+description = "hass_ingress static token embedded in a path (/api/ingress/t-<hex>)"
+regex = '''/api/ingress/t-[0-9a-fA-F]{24,}'''
+keywords = ["/api/ingress/t-"]
+
 [allowlist]
 description = "vendored submodules, virtualenvs and test fixtures are not ours"
 paths = [
