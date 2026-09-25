@@ -1,0 +1,11 @@
+# gitleaks config for this public Home Assistant repo (used by .githooks/pre-commit).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "vendored submodules, virtualenvs and test fixtures are not ours"
+paths = [
+  '''^submodules/''',
+  '''^hga/''',
+  '''(^|/)tests?/fixtures/''',
+]

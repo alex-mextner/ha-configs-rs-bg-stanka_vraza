@@ -69,3 +69,6 @@ custom_components/ha_creality_ws/
 
 # host-actions auth header for shell_command curl calls (secret)
 .host_actions_header
+
+# TLS private keys (ssl/key.pem was public until 2026-09-25)
+ssl/*.pem

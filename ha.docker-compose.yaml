@@ -103,7 +103,7 @@ services:
       - PUID=1000
       - PGID=1000
       - SUBDOMAINS=stvrz
-      - TOKEN=873f27fb-4c66-4e21-905e-54c73da27d83
+      - TOKEN=${DUCKDNS_TOKEN:?set DUCKDNS_TOKEN in .env}
     volumes:
       - /home/ultra/ssl:/config
     restart: unless-stopped
@@ -117,7 +117,7 @@ services:
       - PGID=1000
       - USER_NAME=hassio
       - PASSWORD_ACCESS=true
-      - USER_PASSWORD=homeassistant
+      - USER_PASSWORD=${SSH_SERVER_PASSWORD:?set SSH_SERVER_PASSWORD in .env}
       - SUDO_ACCESS=true
     volumes:
       - /home/ultra/ssh-data:/config
@@ -415,7 +415,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Moscow
-      - SUDO_PASSWORD=homeassistant
+      - SUDO_PASSWORD=${CODE_SERVER_SUDO_PASSWORD:?set CODE_SERVER_SUDO_PASSWORD in .env}
     command: ["--bind-addr", "0.0.0.0:8080", "--auth", "none", "/homeassistant"]
     volumes:
       - /home/ultra/code-server-data:/home/coder
