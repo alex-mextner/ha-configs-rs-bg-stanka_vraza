@@ -116,3 +116,26 @@ rest_command:
     payload: >-
       {"mac": {{ mac | to_json }}, "name": {{ name | default("", true) | to_json }}, "icon": {{ icon | default("", true) | to_json }}}
     timeout: 20
+
+  # Per-device activity (card sparklines and detail drawer): hourly buckets
+  # {"mac", "buckets": [{"t", "online_ratio", "rx_bytes", "tx_bytes"}]} from the local DB.
+  network_history:
+    url: !secret host_network_history_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"device": {{ device | to_json }}, "days": {{ days | default(7) | int }}}
+    timeout: 25
+
+  # Network-wide summary for the card header: online_now, online_avg, per_hour, top_traffic.
+  network_stats:
+    url: !secret host_network_stats_url
+    method: POST
+    headers:
+      X-HA-Host-Token: !secret host_actions_token
+    content_type: "application/json"
+    payload: >-
+      {"days": {{ days | default(7) | int }}}
+    timeout: 25
