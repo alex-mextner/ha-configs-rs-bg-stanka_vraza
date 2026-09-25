@@ -315,6 +315,23 @@ services:
           memory: 256m
           cpus: "1"
 
+  bgutil-pot:
+    # PO-token server for the Music Assistant YouTube Music provider. 2.0.0 fixes an RCE; the
+    # server is unauthenticated, so it is published on host loopback only (MA runs on the host
+    # network and uses http://127.0.0.1:4416).
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.0
+    init: true
+    ports:
+      - "127.0.0.1:4416:4416"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1"
+    networks:
+      - ha-net
+
   hga-postgres:
     # Long-term memory for Home Generative Agent (LangGraph checkpoints + pgvector store).
     # ha-net only, no published ports; password in .env (HGA_DB_PASSWORD).
