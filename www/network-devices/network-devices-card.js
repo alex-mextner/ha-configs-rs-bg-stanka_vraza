@@ -59,6 +59,10 @@ const ND_CATS = {
   network: ['Сетевое оборудование', 'mdi:router-network'],
   iot: ['Умный дом', 'mdi:home-automation'], plug: ['Розетка', 'mdi:power-socket-eu'], light: ['Свет', 'mdi:lightbulb'],
   sensor: ['Датчик', 'mdi:motion-sensor'], ir_remote: ['ИК‑пульт', 'mdi:remote'], esp: ['Микроконтроллер', 'mdi:chip'],
+  // router-cli ids (hyphens are normalized to underscores before lookup)
+  iot_plug: ['Розетка / реле', 'mdi:power-socket-eu'], iot_light: ['Свет', 'mdi:lightbulb'], iot_sensor: ['Датчик', 'mdi:motion-sensor'],
+  esp_diy: ['ESP / DIY', 'mdi:chip'], raspberry_pi: ['Raspberry Pi', 'mdi:raspberry-pi'], media_player: ['Медиаплеер', 'mdi:cast'],
+  game_console: ['Консоль', 'mdi:gamepad-variant'],
   camera: ['Камера', 'mdi:cctv'], console: ['Консоль', 'mdi:gamepad-variant'], sbc: ['Одноплатник', 'mdi:raspberry-pi'],
   raspberry: ['Одноплатник', 'mdi:raspberry-pi'], nas: ['NAS', 'mdi:nas'], server: ['Сервер', 'mdi:server'],
   vacuum: ['Пылесос', 'mdi:robot-vacuum'], appliance: ['Бытовая техника', 'mdi:washing-machine'], unknown: ['Неизвестно', 'mdi:help-network'],
@@ -241,6 +245,7 @@ class NetworkDevicesCard extends HTMLElement {
     if (Date.now() - (this._missing.get(service) || 0) < ND_HISTORY_TTL) return false;
     return !!this._hass?.services?.rest_command?.[service];
   }
+  _histReady() { return !!this._config?.mock || (!!this._histOk && this._has('network_history')); }
   _notFound(service, e) {
     if (!/not_found|HTTP 404/.test(String(e?.message || e))) return false;
     this._missing.set(service, Date.now());
@@ -289,6 +294,8 @@ class NetworkDevicesCard extends HTMLElement {
     }
     if (Date.now() - this._faviconsAt > ND_FAVICON_TTL) this._idle(() => this._loadFavicons());
     if (this._has('network_stats') && Date.now() - this._statsAt > ND_HISTORY_TTL) this._loadStats();
+    // Probe the history endpoint with one device before drawing sparkline placeholders for all rows.
+    if (!this._histOk && this._has('network_history')) { const p = this._data?.devices?.find(x => x.online) || this._data?.devices?.[0]; if (p) this._wantHistory(p.mac); }
     // An action finished while a refresh was already in flight: fetch once more so
     // the result (e.g. the "pinned" badge) shows up immediately.
     if (this._reloadWanted) { this._reloadWanted = false; await this._load(); }
@@ -343,7 +350,10 @@ class NetworkDevicesCard extends HTMLElement {
     while (this._histActive < 2 && this._histQueue.length) {
       const mac = this._histQueue.shift(); this._histActive++;
       this._service('network_history', {device: mac, days: this._config.history_days})
-        .then(r => this._history.set(mac, {at: Date.now(), buckets: Array.isArray(r.buckets) ? r.buckets : []}))
+        .then(r => {
+          this._history.set(mac, {at: Date.now(), buckets: Array.isArray(r.buckets) ? r.buckets : []});
+          if (!this._histOk) { this._histOk = true; this._rows.clear(); this._renderList(); }
+        })
         .catch(e => {
           if (this._notFound('network_history', e)) { this._history.delete(mac); this._histQueue = []; this._missingSeen = true; return; }
           this._history.set(mac, {at: Date.now(), buckets: null, error: this._errText(e)});
@@ -463,13 +473,15 @@ class NetworkDevicesCard extends HTMLElement {
   _iconFor(d) {
     if (d.category && ND_MDI.test(d.icon || '')) return d.icon;   // router-cli classified it (or the user's override)
     if (ND_MDI.test(d.icon || '') && d.icon !== 'mdi:lan-connect' && d.icon !== 'mdi:help-network') return d.icon;
-    if (d.category && ND_CATS[d.category]) return ND_CATS[d.category][1];
+    if (d.category && this._catInfo(d.category)) return this._catInfo(d.category)[1];
     const hay = [d.hostname, ...(d.names || []), d.vendor, ...(d.services || []).map(s => s.title)].filter(Boolean).join(' ');
     for (const [re, icon] of ND_ICON_RULES) if (re.test(hay)) return icon;
     if (ND_MDI.test(d.icon || '')) return d.icon;
     return this._randomMac(d) ? 'mdi:incognito' : 'mdi:lan-connect';
   }
-  _catLabel(c) { return ND_CATS[c]?.[0] || String(c).replace(/_/g, ' '); }
+  _catInfo(c) { return ND_CATS[String(c).toLowerCase().replace(/-/g, '_')] || null; }
+  _catLabel(c) { return this._catInfo(c)?.[0] || String(c).replace(/[_-]/g, ' '); }
+  _guessed(c) { return c?.source === 'heuristic'; }   // router-cli inferred the link type from the device type
   _conf(d) {
     const c = Number(d.confidence);
     if (!Number.isFinite(c) || c <= 0) return null;
@@ -484,10 +496,11 @@ class NetworkDevicesCard extends HTMLElement {
   _connText(d) {
     const c = this._conn(d);
     if (!c) return null;
-    if (c.type === 'wired') return ['mdi:ethernet', ['кабель', c.via_name].filter(Boolean).join(' · ')];
+    const maybe = this._guessed(c) ? 'вероятно ' : '';
+    if (c.type === 'wired') return ['mdi:ethernet', [`${maybe}кабель`, c.via_name].filter(Boolean).join(' · ')];
     if (c.type === 'wifi') {
-      const rssi = Number(c.rssi);
-      return [this._wifiIcon(rssi), ['Wi‑Fi', c.via_name, this._band(c.band), Number.isFinite(rssi) && c.rssi !== null ? `−${Math.abs(Math.round(rssi))} дБм` : '']
+      const rssi = this._num(c.rssi) ?? NaN;
+      return [this._wifiIcon(rssi), [`${maybe}Wi‑Fi`, c.via_name, this._band(c.band), Number.isFinite(rssi) && c.rssi !== null ? `−${Math.abs(Math.round(rssi))} дБм` : '']
         .filter(Boolean).join(' · ')];
     }
     return null;
@@ -649,25 +662,39 @@ class NetworkDevicesCard extends HTMLElement {
       const c = this._conn(d);
       if (this._isGear(d)) { if (!groups.has(d.mac)) groups.set(d.mac, {clients: []}); groups.get(d.mac).gear = d; continue; }
       if (c?.via) put(c.via, d);
-      else put(c?.type === 'wired' ? '~wired' : '~other', d);
+      else put(c?.type === 'wired' ? '~wired' : c?.type === 'wifi' ? '~wifi' : '~other', d);
     }
+    // Gear without known clients is listed together; the rest are pseudo-groups by link type.
+    const lone = [];
+    for (const [k, g] of groups) if (g.gear && !g.clients.length) { lone.push(g.gear); groups.delete(k); }
     const out = [];
     const keys = [...groups.keys()].sort((a, b) => {
-      const rank = (k) => k === '~wired' ? 2 : k === '~other' ? 3 : 1;
+      const rank = (k) => ({'~wifi': 3, '~wired': 4, '~other': 5})[k] || 1;
       const na = byMac.get(a) ? this._name(byMac.get(a)) : a, nb = byMac.get(b) ? this._name(byMac.get(b)) : b;
       return rank(a) - rank(b) || na.localeCompare(nb, 'ru');
     });
+    const header = (key, label, icon, n, gear = false) => out.push({key: `g:${key}`, header: {label, icon, n, gear}});
     for (const k of keys) {
       const g = groups.get(k);
-      const gear = g.gear || byMac.get(k);
-      const viaName = g.clients.map(d => this._conn(d)?.via_name).find(Boolean);
-      const label = k === '~wired' ? 'Кабель (точка не определена)' : k === '~other' ? 'Подключение неизвестно'
-        : `${gear ? this._name(gear) : viaName || k}`;
-      const icon = k === '~wired' ? 'mdi:ethernet' : k === '~other' ? 'mdi:help-network' : gear ? this._iconFor(gear) : 'mdi:access-point';
-      const n = g.clients.length;
-      out.push({key: `g:${k}`, header: {label, icon, n, gear: !k.startsWith('~')}});
-      if (g.gear) out.push({key: g.gear.mac, device: g.gear});
+      if (g.gear) {
+        // The highlighted gear row is the group header; its clients are indented below it.
+        out.push({key: g.gear.mac, device: g.gear, clients: g.clients.length});
+      } else if (k.startsWith('~')) {
+        header(k, k === '~wifi' ? 'Wi‑Fi (точка доступа не определена)' : k === '~wired' ? 'Кабель (точка не определена)' : 'Подключение неизвестно',
+          k === '~wifi' ? 'mdi:wifi' : k === '~wired' ? 'mdi:ethernet' : 'mdi:help-network', g.clients.length);
+      } else {
+        // Clients of an access point that is filtered out of the list.
+        const ap = byMac.get(k);
+        header(k, ap ? this._name(ap) : g.clients.map(d => this._conn(d)?.via_name).find(Boolean) || k,
+          ap ? this._iconFor(ap) : 'mdi:access-point', g.clients.length, true);
+      }
       for (const d of g.clients) out.push({key: d.mac, device: d, child: true});
+    }
+    if (lone.length) {
+      const at = out.findIndex(it => it.key.startsWith('g:~'));
+      const block = [{key: 'g:~gear', header: {label: 'Сетевое оборудование', icon: 'mdi:router-network', n: lone.length}},
+        ...lone.sort((a, b) => this._name(a).localeCompare(this._name(b), 'ru')).map(d => ({key: d.mac, device: d}))];
+      out.splice(at < 0 ? out.length : at, 0, ...block);
     }
     return out;
   }
@@ -688,15 +715,20 @@ class NetworkDevicesCard extends HTMLElement {
         make = () => this._groupHeader(it.header);
       } else {
         const d = it.device;
-        sig = JSON.stringify([d, !!it.child, admin, this._pending.has(d.mac), this._confirm?.mac === d.mac ? this._confirm.action : '',
-          this._editing === d.mac, this._open.has(d.mac), this._has('network_history'), this._ago(d.last_seen), this._ago(d.first_seen),
+        sig = JSON.stringify([d, !!it.child, it.clients ?? null, admin, this._pending.has(d.mac), this._confirm?.mac === d.mac ? this._confirm.action : '',
+          this._editing === d.mac, this._open.has(d.mac), this._histReady(), this._ago(d.last_seen), this._ago(d.first_seen),
           (d.services || []).map(s => this._favicons.get(`${d.mac}|${s.port}`) || '')]);
-        make = () => this._row(d, it.child);
+        make = () => this._row(d, it.child, it.clients);
       }
       const prev = this._rows.get(it.key);
       // Never rebuild a row with an open editor: that would wipe a half-typed name.
       if (prev && (prev.sig === sig || (this._editing === it.key && prev.editing))) { els.push(prev.el); continue; }
-      const el = make();
+      let el;
+      try { el = make(); } catch (e) {
+        // One device with unexpected data must not blank the whole list.
+        console.error('network-devices-card: row render failed', it.key, e);
+        el = this._node('div', `${it.device ? `${it.device.ip || ''} ${it.device.mac}` : it.key}: не удалось отрисовать`, null, 'row muted');
+      }
       this._rows.set(it.key, {sig, el, editing: this._editing === it.key});
       els.push(el);
     }
@@ -721,7 +753,7 @@ class NetworkDevicesCard extends HTMLElement {
     return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? few : many;
   }
 
-  _row(d, child) {
+  _row(d, child, clients) {
     const admin = !!this._hass?.user?.is_admin;
     const busy = this._pending.has(d.mac);
     const gear = this._isGear(d);
@@ -736,7 +768,9 @@ class NetworkDevicesCard extends HTMLElement {
     const nb = this._node('button', this._name(d), nm, 'nm');
     nb.type = 'button'; nb.title = 'Подробнее: активность и трафик';
     nb.addEventListener('click', () => this._openDrawer(d.mac));
+    if (d.is_self) this._badge(nm, 'этот сервер', 'mdi:home-assistant', 'gearb', 'Компьютер, на котором работает Home Assistant');
     if (gear) this._badge(nm, 'сетевое оборудование', 'mdi:router-wireless', 'gearb', 'Роутер, mesh‑узел или точка доступа');
+    if (clients) this._badge(nm, `${clients} ${this._plural(clients, 'клиент', 'клиента', 'клиентов')}`, 'mdi:devices', '', 'Устройства, подключённые через эту точку доступа (показаны ниже)');
     if (this._isNew(d)) this._badge(nm, 'новое', null, 'new');
     if (d.category) {
       const conf = this._conf(d);
@@ -755,8 +789,10 @@ class NetworkDevicesCard extends HTMLElement {
     const ct = this._connText(d);
     if (ct) {
       const c = this._conn(d);
-      this._badge(l1, ct[1], ct[0], c.type === 'wifi' ? 'conn' : 'conn wired',
-        c.type === 'wifi' ? `Wi‑Fi через ${c.via_name || c.via || 'точку доступа'}${c.rssi !== null && c.rssi !== undefined ? `, уровень сигнала ${c.rssi} дБм` : ''}` : 'Подключено кабелем');
+      const guess = this._guessed(c);
+      this._badge(l1, ct[1], ct[0], `conn${c.type === 'wifi' ? '' : ' wired'}${guess ? ' guess' : ''}`,
+        guess ? `Тип подключения предположен по типу устройства (роутер не сообщает, кто подключён по Wi‑Fi, а кто кабелем)`
+          : c.type === 'wifi' ? `Wi‑Fi через ${c.via_name || c.via || 'точку доступа'}${this._num(c.rssi) !== null ? `, уровень сигнала ${c.rssi} дБм` : ''}` : 'Подключено кабелем');
     }
     // router-cli gives [{ip, first_seen, last_seen}]; accept plain strings too.
     const prev = (d.ip_history || []).map(h => typeof h === 'string' ? h : h?.ip).filter(ip => ip && ip !== d.ip);
@@ -765,6 +801,11 @@ class NetworkDevicesCard extends HTMLElement {
     const l2 = this._node('div', null, main, 'line');
     this._node('span', d.mac, l2, 'mono');
     if (d.vendor) this._node('span', d.vendor, l2);
+    if (d.same_device_as) {
+      const other = (this._data?.devices || []).find(x => x.mac === d.same_device_as);
+      this._badge(l2, `тот же, что ${other ? this._name(other) : d.same_device_as}`, 'mdi:link-variant', '',
+        `Это другой сетевой интерфейс того же устройства (${d.same_device_as}${other?.ip ? `, ${other.ip}` : ''})`);
+    }
     if (!ct && d.interface) this._node('span', d.interface === 'lan' ? 'LAN' : d.interface, l2).title = 'Интерфейс по данным роутера';
 
     const l3 = this._node('div', null, main, 'line');
@@ -779,7 +820,7 @@ class NetworkDevicesCard extends HTMLElement {
       const rate = this._rate(tr.rxr + tr.txr);
       if (rate && d.online) this._node('span', `· ${rate}`, t, 'rate');
     }
-    if (this._has('network_history')) {
+    if (this._histReady()) {
       const sp = this._node('span', null, l3, 'spark');
       sp.dataset.mac = d.mac;
       sp.setAttribute('aria-label', `Онлайн по часам за ${this._config.history_days} дней`);
@@ -870,6 +911,13 @@ class NetworkDevicesCard extends HTMLElement {
         }
       }
     } else if (d.category) this._node('div', 'router-cli не прислал доказательств.', body, 'muted');
+    const alts = (Array.isArray(d.alternatives) ? d.alternatives : []).filter(a => a && a.category);
+    if (alts.length) {
+      this._node('div', `Другие варианты: ${alts.map(a => `${this._catLabel(a.category)}${this._conf(a) !== null ? ` ${this._conf(a)}%` : ''}`).join(', ')}.`, body, 'muted');
+    }
+    if (this._guessed(this._conn(d))) {
+      this._node('div', 'Wi‑Fi/кабель здесь — предположение по типу устройства: роутер этого не сообщает.', body, 'muted');
+    }
     if (this._randomMac(d)) {
       this._node('div', 'Приватный (случайный) MAC: так делают телефоны, часы и ноутбуки. Адрес меняется при переподключении, поэтому закреплять IP бесполезно — кнопка «Закрепить IP» скрыта.', body, 'muted');
     }
@@ -1131,10 +1179,11 @@ class NetworkDevicesCard extends HTMLElement {
   _renderStats() {
     const box = this._statsBox;
     if (!box) return;
-    const show = this._has('network_stats');
+    const s = this._stats;
+    // Appears only once the bridge has answered (no "loading" flash while the endpoint may not exist).
+    const show = this._has('network_stats') && !!s;
     box.hidden = !show;
     if (!show) return;
-    const s = this._stats;
     const sig = JSON.stringify([s, this._data?.devices?.length]);
     if (sig === this._statsSig) return;
     this._statsSig = sig;
@@ -1477,6 +1526,7 @@ const ND_CSS = `
   .badge.new{background:rgba(var(--rgb-success-color,67,160,71),.18);color:var(--success-color,#43a047)}
   .badge.cat{background:none;border:1px solid var(--divider-color)}
   .badge.conn{color:var(--primary-text-color)}
+  .badge.conn.guess{background:none;border:1px dashed var(--divider-color);color:var(--secondary-text-color)}
   .traffic{font-variant-numeric:tabular-nums}
   .traffic ha-icon{--mdc-icon-size:14px}
   .traffic .rate{color:var(--primary-text-color)}
