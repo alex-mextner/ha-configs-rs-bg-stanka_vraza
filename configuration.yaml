@@ -142,15 +142,8 @@ scene: !include scenes.yaml
 yandex_station:
   domain: yandex.com
   ssl: false
-  # Manual local IPs: HA runs on a Docker bridge network, so mDNS/zeroconf
-  # discovery of speakers does not work. Upstream-supported option.
-  devices:
-    M00ZRW3008RAJG:  # Мини гостиная
-      host: 192.168.0.22
-    M10DST310HXNPK:  # Станция Мини у Вовы
-      host: 192.168.0.17
-    M0011HM00Z86HG:  # Станция Мини new (3c:0b:4f:d9:db:ae)
-      host: 192.168.0.44
+  # Local speaker IPs come from mDNS: HA has a LAN leg (macvlan, 192.168.0.5)
+  # next to ha-net, see ha.docker-compose.yaml. No hardcoded hosts needed.
 
 rutracker_transmission:
   host_login_url: !secret rutracker_browser_login_url
