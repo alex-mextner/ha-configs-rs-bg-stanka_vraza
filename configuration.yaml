@@ -156,7 +156,7 @@ lovelace:
       type: module
     - url: /local/u1-share/u1-share-card.js?v=20260919a
       type: module
-    - url: /local/wakeword/wakeword-studio-card.js?v=20260925c
+    - url: /local/wakeword/wakeword-studio-card.js?v=20260925d
       type: module
     - url: /webrtc/webrtc-camera.js?v=3.6.1
       type: module

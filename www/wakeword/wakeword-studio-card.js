@@ -7,6 +7,7 @@ const TABS = [
   { id: "noise", label: "Шум", icon: "M3 12h2v-2H3v2Zm4 4h2V8H7v8Zm4 4h2V4h-2v16Zm4-4h2V8h-2v8Zm4-6v4h2v-4h-2Z" },
   { id: "phrase", label: "Фраза", icon: "M4 4h16v12H5.17L4 17.17V4Zm2 4v2h12V8H6Zm0 3v2h8v-2H6Z" },
   { id: "record", label: "Запись", icon: "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z" },
+  { id: "voices", label: "Голоса", icon: "M9 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 10c4.42 0 8 1.79 8 4v2H1v-2c0-2.21 3.58-4 8-4Zm7.76-9.64c2.02 2.2 2.02 5.25 0 7.27l-1.68-1.69c.84-1.18.84-2.71 0-3.89l1.68-1.69ZM20.07 2c3.93 4.05 3.9 10.11 0 14l-1.63-1.63c2.77-3.18 2.77-7.72 0-10.74L20.07 2Z" },
   { id: "review", label: "Разметка", icon: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z" },
   { id: "train", label: "Обучение", icon: "M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z" },
 ];
@@ -107,6 +108,7 @@ class WakewordStudioCard extends HTMLElement {
         <section data-pane="noise"></section>
         <section data-pane="phrase"></section>
         <section data-pane="record"></section>
+        <section data-pane="voices"></section>
         <section data-pane="review"></section>
         <section data-pane="train"></section>
       </ha-card>`;
@@ -137,7 +139,7 @@ class WakewordStudioCard extends HTMLElement {
     }
     if (this._state) this._update();
     if (this._tab === "review" && Date.now() - this._clipsLoadedAt > 15000) this._loadClips();
-    const live = this._tab === "mic" || this._tab === "record";
+    const live = this._tab === "mic" || this._tab === "record" || this._tab === "voices";
     this._schedule(document.hidden ? 5000 : live ? 400 : 2500);
   }
 
@@ -242,6 +244,28 @@ class WakewordStudioCard extends HTMLElement {
           <li>Проверка ищет похожие по звучанию слова в расшифровке ваших домашних записей: чем меньше совпадений в час, тем меньше ложных срабатываний.</li>
         </ul></details>`;
 
+    $("voices").innerHTML = `
+      <div id="voices-live"></div>
+      <div id="voices-users"></div>
+      <h3>Гость</h3>
+      <div class="row"><input id="guest-name" placeholder="Имя гостя" maxlength="40">
+        <div class="seg" id="guest-days"></div>
+        <button class="btn primary" id="guest-start">Записать гостя</button></div>
+      <div id="voices-guests"></div>
+      <div class="note">
+        <b>Зачем.</b> Колонка будет узнавать, кто говорит, и включать вашу музыку, ваши напоминания и ваши настройки (как «Алиса узнаёт по голосу»).
+        Нужно 5 раз сказать фразу и прочитать 8 коротких команд — с того места, откуда вы обычно говорите.
+        Записи хранятся только на этом сервере и удаляются кнопкой «Удалить голос». Голос никогда не открывает замки и не подтверждает платежи.
+        Гостевой голос удаляется сам через выбранное число дней.
+      </div>`;
+    this._guestDays = 3;
+    this._fillSeg("guest-days", [[1, "1 день"], [3, "3 дня"], [7, "7 дней"]], () => this._guestDays, (v) => (this._guestDays = Number(v)));
+    this.shadowRoot.getElementById("guest-start").addEventListener("click", () => {
+      const name = this.shadowRoot.getElementById("guest-name").value.trim();
+      if (!name) { this._setError("Введите имя гостя."); return; }
+      this._voiceStart({ guest: name, days: this._guestDays }, "enroll_phrase");
+    });
+
     $("train").innerHTML = `
       <div id="train-list"></div>
       <div class="note">
@@ -335,6 +359,7 @@ class WakewordStudioCard extends HTMLElement {
     if (this._tab === "record") this._updateRecord(s);
     if (this._tab === "review") this._updateReviewHeader(s);
     if (this._tab === "train") this._updateTrain(s);
+    if (this._tab === "voices") this._updateVoices(s);
   }
 
   _updateChips(s) {
@@ -458,6 +483,104 @@ class WakewordStudioCard extends HTMLElement {
     const zones = [...(this._state?.room?.zones || []).filter((z) => z.name.toLowerCase() !== name.toLowerCase()), { name, center, width: 40, kind: this._zoneKind }];
     await this._act("room", () => this._api("POST", "room", { zones }));
     this.shadowRoot.getElementById("zone-name").value = "";
+  }
+
+  async _loadVoices(force = false) {
+    if (this._voicesLoading || (!force && Date.now() - (this._voicesAt || 0) < 5000)) return;
+    this._voicesLoading = true;
+    try {
+      this._voices = await this._api("GET", "voices");
+      this._voicesAt = Date.now();
+    } catch (e) {
+      this._setError(`Не удалось загрузить голоса: ${e?.body?.message || e?.message || e}`);
+    } finally {
+      this._voicesLoading = false;
+    }
+  }
+
+  async _voiceStart(who, kind) {
+    await this._act("voices", () => this._api("POST", "voices", { action: "start", kind, ...who }));
+    this._pendingWho = who;
+    this._loadVoices(true);
+  }
+
+  _updateVoices(s) {
+    this._loadVoices();
+    const v = this._voices;
+    const r = this.shadowRoot;
+    const pos = s.positive || {};
+    const sess = pos.session || {};
+    const enrolling = pos.active && /^(user|guest)-/.test(sess.speaker || "") && /^enroll_/.test(sess.style || "");
+    const live = r.getElementById("voices-live");
+    let liveHtml = "";
+    if (enrolling && v) {
+      const target = v.targets[sess.style] || 5;
+      const n = pos.captured || 0;
+      const who = (v.users.find((u) => `user-${u.id}` === sess.speaker) || {}).name
+        || (v.guests.find((g) => `guest-${g.slug}` === sess.speaker) || {}).name || sess.speaker;
+      const phrase = s.phrase?.selected?.phrase || "фразу";
+      const body = sess.style === "enroll_phrase"
+        ? `<div class="say">Скажите: <span>«${esc(phrase)}»</span></div><div class="small center">пауза 3–5 секунд между повторами</div>`
+        : `<ol class="cmds">${v.commands.map((c, i) => `<li class="${i < n ? "done" : i === n ? "next" : ""}">${esc(c)}</li>`).join("")}</ol>
+           <div class="small center">читайте по одной, с паузой 3–5 секунд</div>`;
+      liveHtml = `
+        <div class="pipe running">
+          <div class="row between"><div class="big">Записываю голос: ${esc(who)}</div><span class="st running">${sess.style === "enroll_phrase" ? "фраза" : "команды"}</span></div>
+          ${body}
+          <div class="counter">${n}<small> / ${target}</small></div>
+          <button class="btn ${n >= target ? "primary" : ""} wide" id="voices-finish">${n >= target ? "Готово" : "Закончить досрочно"}</button>
+        </div>`;
+    }
+    if (live.dataset.html !== liveHtml) {
+      live.dataset.html = liveHtml;
+      live.innerHTML = liveHtml;
+      live.querySelector("#voices-finish")?.addEventListener("click", () => this._act("positive", async () => {
+        await this._api("POST", "positive", { action: "finish" });
+        const who = this._pendingWho;
+        const style = sess.style;
+        this._loadVoices(true);
+        if (who && style === "enroll_phrase" && confirm("Фраза записана. Записать 8 команд этим же голосом?")) {
+          await this._voiceStart(who, "enroll_commands");
+        }
+      }));
+    }
+    const beep = enrolling ? pos.captured : null;
+    if (this._voicesCaptured != null && beep != null && beep > this._voicesCaptured) this._click();
+    this._voicesCaptured = beep;
+    if (!v) return;
+    const bar = (have, need) => `<div class="progress thin"><div style="width:${Math.min(100, Math.round((have / need) * 100))}%"></div></div>`;
+    const row = (label, sub, clips, whoAttr) => {
+      const p = clips.enroll_phrase || 0, c = clips.enroll_commands || 0;
+      const done = p >= v.targets.enroll_phrase && c >= v.targets.enroll_commands;
+      return `<div class="voice-row">
+          <div class="voice-main"><div><b>${esc(label)}</b> <span class="small">${esc(sub)}</span> ${done ? '<span class="st done">голос записан</span>' : ""}</div>
+            <div class="small">фраза ${p}/${v.targets.enroll_phrase}</div>${bar(p, v.targets.enroll_phrase)}
+            <div class="small">команды ${c}/${v.targets.enroll_commands}</div>${bar(c, v.targets.enroll_commands)}</div>
+          <div class="voice-actions">
+            <button class="btn small-btn" data-act="enroll_phrase" ${whoAttr} ${enrolling ? "disabled" : ""}>Фраза</button>
+            <button class="btn small-btn" data-act="enroll_commands" ${whoAttr} ${enrolling ? "disabled" : ""}>Команды</button>
+            ${p + c ? `<button class="btn small-btn" data-act="delete" ${whoAttr}>Удалить голос</button>` : ""}
+          </div></div>`;
+    };
+    const usersHtml = `<h3>Домочадцы (пользователи Home Assistant)</h3>` + v.users.map((u) =>
+      row(u.name, u.owner ? "владелец" : u.admin ? "админ" : "", u.clips, `data-user="${esc(u.id)}"`)).join("");
+    const guestsHtml = v.guests.length ? v.guests.map((g) =>
+      row(g.name, `гость до ${fmtTime(g.expires_at)}`, g.clips, `data-guest="${esc(g.name)}"`)).join("") : "";
+    const wire = (el, html) => {
+      if (el.dataset.html === html) return;
+      el.dataset.html = html;
+      el.innerHTML = html;
+      el.querySelectorAll("button[data-act]").forEach((b) => b.addEventListener("click", () => {
+        const who = b.dataset.user ? { user_id: b.dataset.user } : { guest: b.dataset.guest };
+        if (b.dataset.act === "delete") {
+          if (confirm("Удалить все записи этого голоса?")) this._act("voices", async () => { await this._api("POST", "voices", { action: "delete", ...who }); this._loadVoices(true); });
+        } else {
+          this._voiceStart(who, b.dataset.act);
+        }
+      }));
+    };
+    wire(r.getElementById("voices-users"), usersHtml);
+    wire(r.getElementById("voices-guests"), guestsHtml);
   }
 
   _updateTrain(s) {
@@ -867,6 +990,13 @@ h3 { font-size:1em; margin:18px 0 6px; }
 .clip.rejected .no-btn { background: var(--error-color, #e53935); color:#fff; border-color: transparent; }
 .sentinel { height: 24px; }
 a { color: var(--primary-color); }
+.voice-row { display:flex; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--divider-color); flex-wrap:wrap; }
+.voice-main { flex:1; min-width:200px; }
+.voice-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.cmds { margin:8px 0; padding-left:22px; line-height:1.7; }
+.cmds li.done { color: var(--secondary-text-color); text-decoration: line-through; }
+.cmds li.next { font-weight:700; font-size:1.15em; color: var(--primary-color); }
+.center { text-align:center; }
 .pipe { padding:12px 14px; border-radius:10px; border:1px solid var(--divider-color); margin-bottom:12px; }
 .pipe.failed { border-color: var(--error-color, #e53935); }
 .st { font-size:.82em; padding:2px 10px; border-radius:10px; background: var(--secondary-background-color, #eee); }

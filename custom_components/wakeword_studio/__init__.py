@@ -473,9 +473,131 @@ class AudioView(_Base):
         return web.FileResponse(path, headers={"Content-Type": "audio/wav", "Cache-Control": "private, max-age=300"})
 
 
+# ---------------------------------------------------------------- voice accounts
+# Enrolment recordings for speaker recognition (aisis#8): each HA user (or a guest with an
+# expiry) records the wake phrase and a few commands through the same guided session
+# recorder as the «Запись» tab. Clips carry speaker "user-<ha user id>" / "guest-<slug>"
+# and style enroll_phrase / enroll_commands; they stay on the box and can be deleted here.
+ENROLL_TARGETS = {"enroll_phrase": 5, "enroll_commands": 8}
+ENROLL_COMMANDS = [
+    "Включи свет на кухне", "Какая погода завтра?", "Поставь таймер на десять минут",
+    "Включи мою музыку", "Сделай потише", "Что сейчас играет?", "Выключи телевизор",
+    "Напомни купить хлеб",
+]
+GUESTS = DATASET / "voices" / "guests.json"
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^0-9a-zа-яё]+", "-", text.lower()).strip("-")[:30] or "guest"
+
+
+def voice_counts() -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for c in list_clips():
+        sp, style = c.get("speaker") or "", c.get("style") or ""
+        if (sp.startswith(("user-", "guest-"))) and style in ENROLL_TARGETS and c.get("status") != "rejected":
+            counts.setdefault(sp, {k: 0 for k in ENROLL_TARGETS})[style] += 1
+    return counts
+
+
+def expire_guests() -> dict[str, Any]:
+    guests = _read_json(GUESTS, {}) or {}
+    now = _now()
+    expired = [s for s, g in guests.items() if dt.datetime.fromisoformat(g["expires_at"]) < now]
+    for s in expired:
+        delete_voice(f"guest-{s}")
+        guests.pop(s, None)
+    if expired:
+        _write_json(GUESTS, guests)
+    return guests
+
+
+def delete_voice(speaker: str) -> int:
+    root = DATASET / "positives" / "real_user"
+    removed = 0
+    for wav in root.glob("*/*.wav") if root.exists() else []:
+        meta = _read_json(wav.with_suffix(".json"), {}) or {}
+        if meta.get("speaker") == speaker:
+            wav.unlink(missing_ok=True)
+            wav.with_suffix(".json").unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+class VoicesView(_Base):
+    url = "/api/wakeword_studio/voices"
+    name = "api:wakeword_studio:voices"
+
+    async def get(self, request: web.Request) -> web.Response:
+        users = [u for u in await self.hass.auth.async_get_users() if not u.system_generated and u.is_active]
+        # Household members are the users linked to a person entity (service users such as a
+        # camera-share account are not); fall back to all users when no person is linked.
+        person_users = {s.attributes.get("user_id") for s in self.hass.states.async_all("person")} - {None}
+        if person_users:
+            users = [u for u in users if u.id in person_users]
+        guests = await self.job(expire_guests)
+        counts = await self.job(voice_counts)
+        empty = {k: 0 for k in ENROLL_TARGETS}
+        return self.json({
+            "targets": ENROLL_TARGETS,
+            "commands": ENROLL_COMMANDS,
+            "users": [{"id": u.id, "name": u.name, "owner": u.is_owner, "admin": u.is_admin,
+                       "clips": counts.get(f"user-{u.id}", empty)} for u in users],
+            "guests": [{"slug": s, "name": g["name"], "expires_at": g["expires_at"],
+                        "clips": counts.get(f"guest-{s}", empty)} for s, g in guests.items()],
+        })
+
+    async def post(self, request: web.Request) -> web.Response:
+        data = await self.body(request)
+        action = data.get("action")
+        users = {u.id: u for u in await self.hass.auth.async_get_users() if not u.system_generated}
+        caller = request.get("hass_user")
+        if data.get("user_id"):
+            if data["user_id"] not in users:
+                return self.json_message("unknown user", 400)
+            if caller is None or (not caller.is_admin and caller.id != data["user_id"]):
+                return self.json_message("only admins can record or delete another user's voice", 403)
+            speaker = f"user-{data['user_id']}"
+        elif data.get("guest"):
+            slug = _slug(str(data["guest"]))
+            speaker = f"guest-{slug}"
+        else:
+            return self.json_message("user_id or guest required", 400)
+        if action == "start":
+            kind = data.get("kind")
+            if kind not in ENROLL_TARGETS:
+                return self.json_message("kind must be enroll_phrase or enroll_commands", 400)
+            selected = await self.job(_read_json, DATASET / "phrase" / "selected.json")
+            if not selected:
+                return self.json_message("Сначала выберите фразу", 409)
+            if await self.job(lambda: (DATASET / "positive_sessions" / "current.json").exists()):
+                return self.json_message("Сессия уже идёт", 409)
+            if speaker.startswith("guest-"):
+                days = max(1, min(7, int(data.get("days") or 3)))
+                guests = await self.job(_read_json, GUESTS, {}) or {}
+                guests.setdefault(slug, {"name": str(data["guest"])[:40],
+                                         "expires_at": (_now() + dt.timedelta(days=days)).isoformat()})
+                await self.job(_write_json, GUESTS, guests)
+            argv = [str(SCRIPTS / "wakeword_real_positive_session.py"), "--dataset-root", str(DATASET),
+                    "--debug-root", "/config/wyoming-debug", "start", "--phrase", selected["phrase"],
+                    "--speaker", speaker, "--style", kind, "--location", "room",
+                    "--expected-attempts", str(ENROLL_TARGETS[kind])]
+            code, out = await self.run_script(*argv)
+            return self.json({"ok": code == 0, "output": out}, 200 if code == 0 else 409)
+        if action == "delete":
+            removed = await self.job(delete_voice, speaker)
+            if speaker.startswith("guest-"):
+                guests = await self.job(_read_json, GUESTS, {}) or {}
+                guests.pop(speaker[6:], None)
+                await self.job(_write_json, GUESTS, guests)
+            self.store["slow_at"] = 0.0
+            return self.json({"ok": True, "removed": removed})
+        return self.json_message("action must be start or delete", 400)
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     store: dict[str, Any] = {"slow": {}, "slow_at": 0.0}
-    for view in (StateView, NoiseView, PhraseView, PositiveView, ReviewView, RoomView, AudioView):
+    for view in (StateView, NoiseView, PhraseView, PositiveView, ReviewView, RoomView, AudioView, VoicesView):
         hass.http.register_view(view(hass, store))
     _LOGGER.info("Wakeword Studio API registered at /api/wakeword_studio/*")
     return True
