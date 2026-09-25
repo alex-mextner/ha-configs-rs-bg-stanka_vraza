@@ -276,7 +276,17 @@ def slow_state() -> dict[str, Any]:
         "positive": {"active": bool(positive), "session": positive, "captured": captured},
         "review": {"total": len(clips), "by_status": counts, "by_speaker": speakers},
         "room": _read_json(DATASET / "room.json", {"zones": []}) or {"zones": []},
+        "training": training_state(),
     }
+
+
+def training_state() -> dict[str, Any]:
+    """Pipeline progress written every minute by wakeword pipeline_status.py (host cron)."""
+    status = _read_json(DATASET / "training" / "status.json", {}) or {}
+    status["status_age_seconds"] = _age(status.get("updated_at"))
+    for p in status.get("pipelines", []):
+        p.pop("notified", None)
+    return status
 
 
 class _Base(HomeAssistantView):

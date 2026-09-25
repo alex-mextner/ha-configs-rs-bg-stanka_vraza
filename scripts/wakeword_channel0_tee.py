@@ -18,6 +18,7 @@ import shutil
 import struct
 import sys
 import time
+from array import array
 from pathlib import Path
 
 
@@ -50,6 +51,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--record-always", action="store_true", help="ignore the session file and always record")
     parser.add_argument("--min-free-gb", type=float, default=30.0, help="skip segments below this free disk space")
     parser.add_argument(
+        "--drop-silent-peak",
+        type=int,
+        default=2,
+        help="delete a finished segment whose |sample| never exceeds this (digital silence: muted or dead mic); -1 keeps all",
+    )
+    parser.add_argument(
         "--positive-cooldown-seconds",
         type=float,
         default=90.0,
@@ -80,6 +87,11 @@ class SegmentWriter:
     Noise recordings must never contain the wake phrase: while a positive
     (phrase) collection session is active, and for a cooldown after it, the
     segment being written is discarded and recording stays paused.
+
+    A finished segment that is digital silence throughout (a muted or dead
+    microphone; a quiet room never gets there, the XVF AGC keeps its floor near
+    -50 dBFS) is deleted and logged to silence_skipped.jsonl, so it takes no disk
+    and cannot pad the hours a false-accept rate is measured over.
     """
 
     def __init__(
@@ -94,8 +106,12 @@ class SegmentWriter:
         min_free_bytes: int = 0,
         positive_session_file: Path | None = None,
         positive_cooldown_seconds: float = 90.0,
+        drop_silent_peak: int = 2,
     ) -> None:
         self.output_dir = output_dir
+        self.drop_silent_peak = drop_silent_peak
+        self.segment_peak = 0
+        self.segment_started: dt.datetime | None = None
         self.sample_rate = sample_rate
         self.sample_width = sample_width
         self.segment_frames = segment_frames
@@ -150,6 +166,8 @@ class SegmentWriter:
         path = day_dir / f"{now.strftime('%H%M%S_%f')}.wav"
         self.current = path.open("w+b")
         self.current_path = path
+        self.segment_peak = 0
+        self.segment_started = dt.datetime.now(dt.timezone.utc)
         self.frames_written = 0
         self.frames_since_sync = 0
         self._write_header()
@@ -211,8 +229,14 @@ class SegmentWriter:
             take_frames = min(available_frames, total_frames - (offset // frame_bytes))
             take_bytes = take_frames * frame_bytes
             if self.current is not None:
-                self.current.write(data[offset : offset + take_bytes])
+                chunk = data[offset : offset + take_bytes]
+                self.current.write(chunk)
                 self.frames_since_sync += take_frames
+                if self.drop_silent_peak >= 0 and self.segment_peak <= self.drop_silent_peak and chunk:
+                    pcm = array("h")
+                    pcm.frombytes(chunk[: len(chunk) - len(chunk) % 2])
+                    if pcm:
+                        self.segment_peak = max(self.segment_peak, max(pcm), -min(pcm))
             self.frames_written += take_frames
             offset += take_bytes
             if self.current is not None and self.frames_since_sync >= self.sync_frames:
@@ -223,6 +247,21 @@ class SegmentWriter:
             self._sync()
             self.current.close()
             self.current = None
+            if self.drop_silent_peak >= 0 and self.segment_peak <= self.drop_silent_peak and self.current_path is not None:
+                self._drop_silent(self.current_path)
+
+    def _drop_silent(self, path: Path) -> None:
+        path.unlink(missing_ok=True)
+        entry = {
+            "start": self.segment_started.isoformat(timespec="seconds") if self.segment_started else None,
+            "end": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "seconds": round(self.frames_written / self.sample_rate, 1),
+            "peak": self.segment_peak,
+            "file": path.name,
+        }
+        with (self.output_dir / "silence_skipped.jsonl").open("a", encoding="utf-8") as log:
+            log.write(json.dumps(entry) + "\n")
+        print(f"[wakeword-recorder] digital silence, not kept: {path}", file=sys.stderr, flush=True)
 
 
 class NullWriter:
@@ -643,6 +682,7 @@ def main() -> int:
             min_free_bytes=int(args.min_free_gb * 1e9),
             positive_session_file=args.positive_session_file,
             positive_cooldown_seconds=args.positive_cooldown_seconds,
+            drop_silent_peak=args.drop_silent_peak,
         )
     )
     status = ArrayStatusWriter(

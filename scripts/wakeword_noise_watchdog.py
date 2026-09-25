@@ -104,6 +104,7 @@ def summarize_raw_live(dataset_root: Path, started_at: dt.datetime | None, updat
     counted = silent_files = 0
     recent: list[dict[str, Any]] = []
     changed = False
+    newest_sound: dt.datetime | None = None
 
     for path in files:
         stat = path.stat()
@@ -132,10 +133,29 @@ def summarize_raw_live(dataset_root: Path, started_at: dt.datetime | None, updat
             silent_seconds += entry["duration"]
         else:
             seconds += entry["duration"]
+            newest_sound = mtime if newest_sound is None or mtime > newest_sound else newest_sound
         recent.append({"file": key, **{k: entry[k] for k in ("duration", "peak", "rms_dbfs")}})
 
     if changed and update_cache:
         save_json(cache_path, cache)
+    # The capture tee deletes digital-silence segments and logs them here.
+    skipped_files, last_skip = 0, None
+    skip_log = raw_live / "silence_skipped.jsonl"
+    if skip_log.exists():
+        for line in skip_log.read_text(encoding="utf-8").splitlines():
+            try:
+                item = json.loads(line)
+                end = dt.datetime.fromisoformat(item["end"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            if started_at is not None and end < started_at:
+                continue
+            skipped_files += 1
+            silent_files += 1
+            silent_seconds += float(item.get("seconds") or 0)
+            last_skip = end if last_skip is None or end > last_skip else last_skip
+    if last_skip is not None and (latest_mtime is None or last_skip > latest_mtime):
+        latest_mtime = last_skip
     newest_age_seconds = None
     if latest_mtime is not None:
         newest_age_seconds = max(0.0, (now_utc() - latest_mtime).total_seconds())
@@ -147,7 +167,10 @@ def summarize_raw_live(dataset_root: Path, started_at: dt.datetime | None, updat
         "silent_files_since_start": silent_files,
         "silent_hours_since_start": round(silent_seconds / 3600.0, 4),
         "recent_segments": recent,
-        "recent_all_silent": bool(recent) and all(r["peak"] <= SILENT_PEAK for r in recent[-3:]),
+        "recent_all_silent": (bool(recent) and all(r["peak"] <= SILENT_PEAK for r in recent[-3:]))
+        or (last_skip is not None and (not recent or recent[-1]["peak"] <= SILENT_PEAK)
+            and (newest_sound is None or last_skip >= newest_sound)),
+        "silence_skipped_files_since_start": skipped_files,
         "latest_file": str(latest_path) if latest_path else None,
         "latest_mtime": latest_mtime.isoformat() if latest_mtime else None,
         "latest_age_seconds": newest_age_seconds,

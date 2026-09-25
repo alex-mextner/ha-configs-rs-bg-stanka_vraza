@@ -8,6 +8,7 @@ const TABS = [
   { id: "phrase", label: "Фраза", icon: "M4 4h16v12H5.17L4 17.17V4Zm2 4v2h12V8H6Zm0 3v2h8v-2H6Z" },
   { id: "record", label: "Запись", icon: "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z" },
   { id: "review", label: "Разметка", icon: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z" },
+  { id: "train", label: "Обучение", icon: "M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z" },
 ];
 
 const STYLES = [
@@ -107,6 +108,7 @@ class WakewordStudioCard extends HTMLElement {
         <section data-pane="phrase"></section>
         <section data-pane="record"></section>
         <section data-pane="review"></section>
+        <section data-pane="train"></section>
       </ha-card>`;
     this.shadowRoot.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => this._selectTab(b.dataset.tab)));
     this._buildPanes();
@@ -240,6 +242,14 @@ class WakewordStudioCard extends HTMLElement {
           <li>Проверка ищет похожие по звучанию слова в расшифровке ваших домашних записей: чем меньше совпадений в час, тем меньше ложных срабатываний.</li>
         </ul></details>`;
 
+    $("train").innerHTML = `
+      <div id="train-list"></div>
+      <div class="note">
+        <b>Как это устроено.</b> Модель учится на синтетических произнесениях фразы разными голосами и акцентами, смешанных с записанным шумом вашего дома,
+        а принимается только по отложенным данным: день домашнего шума, который она не видела (ложные срабатывания в час), и голоса, которых не было в обучении (полнота).
+        Когда обучение закончится или упадёт, придёт уведомление в Home Assistant.
+      </div>`;
+
     $("record").innerHTML = `
       <div id="rec-need-phrase" class="note warn" hidden>Сначала выберите фразу во вкладке «Фраза».</div>
       <div id="rec-setup">
@@ -324,6 +334,7 @@ class WakewordStudioCard extends HTMLElement {
     if (this._tab === "phrase") this._updatePhrase(s);
     if (this._tab === "record") this._updateRecord(s);
     if (this._tab === "review") this._updateReviewHeader(s);
+    if (this._tab === "train") this._updateTrain(s);
   }
 
   _updateChips(s) {
@@ -336,6 +347,8 @@ class WakewordStudioCard extends HTMLElement {
       chip(n.state === "recording" ? true : null, n.state === "recording" ? `Шум: ${fmtHours(n.raw_live?.hours_since_start)}` : "Шум не пишется"),
       chip(sel ? true : null, sel ? `Фраза: «${sel.phrase}»` : "Фраза не выбрана"),
       s.positive?.active ? chip(true, "Идёт запись фразы") : "",
+      ...(s.training?.pipelines || []).filter((p) => p.state === "running" || p.state === "failed").map((p) =>
+        chip(p.state === "running" ? true : false, p.state === "running" ? `Обучение: ${Math.round((p.progress || 0) * 100)}%` : "Обучение: ошибка")),
     ].join("");
   }
 
@@ -447,6 +460,46 @@ class WakewordStudioCard extends HTMLElement {
     this.shadowRoot.getElementById("zone-name").value = "";
   }
 
+  _updateTrain(s) {
+    const t = s.training || {};
+    const list = this.shadowRoot.getElementById("train-list");
+    const pipes = t.pipelines || [];
+    const mins = (sec) => (sec == null ? "" : sec < 90 ? "~1 мин" : sec < 5400 ? `~${Math.round(sec / 60)} мин` : `~${(sec / 3600).toFixed(1)} ч`);
+    const icon = { done: "✓", running: "●", failed: "✗", pending: "○" };
+    const label = { done: "Готово", running: "Идёт", failed: "Ошибка", pending: "Ожидает" };
+    const stale = t.status_age_seconds != null && t.status_age_seconds > 180;
+    const html = !pipes.length
+      ? `<p class="muted">Обучение сейчас не запущено.</p>`
+      : pipes.map((p) => {
+        const left = p.stages.filter((st) => st.state !== "done").reduce((a, st) => a + (st.eta_seconds || 0), 0);
+        return `
+        <div class="pipe ${p.state}">
+          <div class="row between"><div class="big">${esc(p.title)}</div><span class="st ${p.state}">${label[p.state] || esc(p.state)}</span></div>
+          <div class="progress"><div style="width:${Math.round((p.progress || 0) * 100)}%"></div></div>
+          <div class="row between small"><span>${Math.round((p.progress || 0) * 100)}% · этапов готово ${p.stages.filter((st) => st.state === "done").length} из ${p.stages.length}</span>
+            <span>${p.state === "running" && left ? `осталось ${mins(left)}${p.stages.some((st) => st.state !== "done" && st.estimate) ? " (оценка)" : ""}` : ""}</span></div>
+          <div class="stages">${p.stages.map((st) => `
+            <div class="stage ${st.state}">
+              <span class="ic">${icon[st.state] || "○"}</span>
+              <div class="stage-main"><div>${esc(st.title)}</div>
+                ${st.state === "running" ? `<div class="progress thin"><div style="width:${Math.round((st.progress || 0) * 100)}%"></div></div>
+                  <div class="small">${st.progress != null ? `${Math.round(st.progress * 100)}%` : "идёт"}${st.detail ? ` · ${esc(st.detail)}` : ""}${st.eta_seconds ? ` · ещё ${mins(st.eta_seconds)}` : ""}${st.estimate ? " · оценка по времени" : ""}</div>` : ""}
+                ${st.state === "done" && st.finished_at ? `<div class="small">${fmtTime(st.finished_at)}</div>` : ""}
+              </div>
+            </div>`).join("")}
+          </div>
+          ${p.summary ? `<h3>Результаты приёмки</h3><pre class="pre">${esc(p.summary)}</pre>` : ""}
+          ${p.log_tail?.length ? `<details class="note"><summary>Журнал</summary><pre class="pre">${esc(p.log_tail.join("\n"))}</pre></details>` : ""}
+        </div>`;
+      }).join("") + (stale ? `<div class="note warn">Статус не обновлялся ${Math.round(t.status_age_seconds / 60)} мин: проверьте cron pipeline_status.py.</div>` : "");
+    if (list.dataset.html !== html) {
+      const open = [...list.querySelectorAll("details")].map((d) => d.open);
+      list.dataset.html = html;
+      list.innerHTML = html;
+      list.querySelectorAll("details").forEach((d, i) => (d.open = !!open[i]));
+    }
+  }
+
   _updateNoise(s) {
     const n = s.noise || {};
     const rl = n.raw_live || {};
@@ -460,7 +513,7 @@ class WakewordStudioCard extends HTMLElement {
     const kv = [
       ["Начата", fmtTime(n.started_at)],
       ["Последний сегмент", last ? `${fmtTime(rl.latest_mtime)} · пик ${last.peak} · ${last.rms_dbfs} dBFS` : "—"],
-      ["Тишина (не засчитана)", fmtHours(rl.silent_hours_since_start)],
+      ["Цифровая тишина (не записана)", fmtHours(rl.silent_hours_since_start)],
       ["Свободно на диске", n.disk ? `${n.disk.free_gb} ГБ (пауза ниже 30 ГБ)` : "—"],
       ["Статус обновлён", n.status_age_seconds == null ? "—" : `${Math.round(n.status_age_seconds / 60)} мин назад`],
     ];
@@ -814,6 +867,23 @@ h3 { font-size:1em; margin:18px 0 6px; }
 .clip.rejected .no-btn { background: var(--error-color, #e53935); color:#fff; border-color: transparent; }
 .sentinel { height: 24px; }
 a { color: var(--primary-color); }
+.pipe { padding:12px 14px; border-radius:10px; border:1px solid var(--divider-color); margin-bottom:12px; }
+.pipe.failed { border-color: var(--error-color, #e53935); }
+.st { font-size:.82em; padding:2px 10px; border-radius:10px; background: var(--secondary-background-color, #eee); }
+.st.running { background: color-mix(in srgb, var(--primary-color) 18%, transparent); color: var(--primary-color); }
+.st.done { background: color-mix(in srgb, var(--success-color, #43a047) 18%, transparent); color: var(--success-color, #2e7d32); }
+.st.failed { background: color-mix(in srgb, var(--error-color, #e53935) 18%, transparent); color: var(--error-color, #c62828); }
+.stages { display:flex; flex-direction:column; gap:2px; margin-top:10px; }
+.stage { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid var(--divider-color); }
+.stage:last-child { border-bottom:0; }
+.stage .ic { width:18px; text-align:center; flex:none; color: var(--secondary-text-color); }
+.stage.done .ic { color: var(--success-color, #43a047); }
+.stage.running .ic { color: var(--primary-color); }
+.stage.failed .ic { color: var(--error-color, #e53935); }
+.stage.pending { color: var(--secondary-text-color); }
+.stage-main { flex:1; min-width:0; }
+.progress.thin { height:6px; margin:6px 0 2px; }
+.pre { white-space:pre-wrap; overflow-x:auto; font-size:.8em; line-height:1.35; margin:6px 0 0; font-family: var(--code-font-family, monospace); }
 `;
 
 if (!customElements.get("wakeword-studio-card")) {
