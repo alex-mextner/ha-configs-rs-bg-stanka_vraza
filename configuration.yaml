@@ -48,6 +48,20 @@ ingress:
     url: http://172.20.0.1:8095
     work_mode: ingress
     ui_mode: normal
+    # Auto-login inside the HA panel: store a long-lived token of the MA user ha_panel in the
+    # page served through HA's authenticated ingress path only (never add static_token here).
+    # The snippet lives in secrets.yaml. Do not click Logout in the panel: it revokes that token.
+    rewrite:
+      - mode: body
+        path: ^/(index\.html)?$
+        name: text/html
+        match: '<head>'
+        replace: !secret ma_panel_autologin
+      - mode: header
+        path: ^/(index\.html)?$
+        name: ^etag$
+        match: '"$'
+        replace: '-ha"'
   transmission:
     require_admin: true
     title: Transmission
