@@ -351,6 +351,63 @@ services:
     networks:
       - ha-net
 
+  openclaw:
+    # OpenClaw gateway: central assistant backend (aisis V1 runtime). Official image, pinned by digest.
+    # Published on host loopback only; inside the container it listens on 0.0.0.0 ("lan") because
+    # a loopback bind would be unreachable through the published port. Token auth: the config holds
+    # only an env SecretRef, the value is OPENCLAW_GATEWAY_TOKEN in .env. State and config live in
+    # /home/ultra/openclaw (runbook: /home/ultra/openclaw/README.md). Model auth: user onboarding.
+    image: ghcr.io/openclaw/openclaw:2026.9.6@sha256:0a5ff5e682e62afa19149df126aa50063bf65ef885b5c94713ce32dc0eb12e15
+    user: "1000:1000"
+    init: true
+    environment:
+      HOME: /home/node
+      OPENCLAW_HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+      OPENCLAW_GATEWAY_PORT: "18789"
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?set OPENCLAW_GATEWAY_TOKEN in .env}
+      # No mDNS advertising: avahi-reflector on ha-net would repeat it onto the LAN.
+      OPENCLAW_DISABLE_BONJOUR: "1"
+      TZ: Europe/Belgrade
+    volumes:
+      - /home/ultra/openclaw/state:/home/node/.openclaw
+      - /home/ultra/openclaw/workspace:/home/node/.openclaw/workspace
+      - /home/ultra/openclaw/auth-profile-secrets:/home/node/.config/openclaw
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
+    ports:
+      - "127.0.0.1:18789:18789"
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "node", "dist/docker-healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    deploy:
+      resources:
+        # Idle it already needs ~840 MB (gateway + codex/sqlite helpers); 1g hit the cap at startup.
+        # Official docs recommend 2 GB. Swap capped at the same value.
+        limits:
+          memory: 2g
+          cpus: "1"
+    memswap_limit: 2g
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "2"}
+    networks:
+      - ha-net
+
   code-server:
     image: codercom/code-server:latest
     user: "1000:1000"
