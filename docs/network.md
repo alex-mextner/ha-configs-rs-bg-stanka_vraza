@@ -13,6 +13,8 @@ It describes the working state as of 2026-09-26; update it with every network ch
 
 Router: the ISP modem/router at 192.168.0.1 (DHCP pool .10-.254, few static reservations).
 Speakers, TV and other devices have plain DHCP addresses, so nothing may hardcode their IPs.
+Which TV / Chromecast player entity is which, and why the Samsung's DLNA player is hidden:
+[media-players.md](media-players.md).
 
 The whole stack starts at boot through `ha-compose.service` (`docker compose -f
 ha.docker-compose.yaml up -d`), so whatever `ha.docker-compose.yaml` says is what runs after a reboot.
