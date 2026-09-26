@@ -48,6 +48,9 @@ services:
     network_mode: host
     volumes:
       - /home/ultra/music-assistant:/data
+      # person_likes plugin (aisis#17): like/unlike in ONE account, used by HA music_accounts.
+      # The target follows the image's Python version: re-check it when bumping MA.
+      - /home/ultra/homeassistant/docker/music-assistant/person_likes:/app/venv/lib/python3.14/site-packages/music_assistant/providers/person_likes:ro
     restart: unless-stopped
     deploy:
       resources:

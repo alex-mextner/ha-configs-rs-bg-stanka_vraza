@@ -1,0 +1,105 @@
+# Who: `speaker` is the voice-account id of the Wakeword Studio (user-<HA user id> or
+# guest-<slug>), `person` a person entity. Without either (or unknown / expired guest) play and
+# search use the household default account; like needs the person's own account.
+play:
+  name: Play as a person
+  description: music_assistant.play_media with the person's own YouTube Music / Yandex Music accounts.
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          domain: media_player
+          integration: music_assistant
+    media_id:
+      required: true
+      example: "Queen - Bohemian Rhapsody"
+      selector:
+        object:
+    media_type:
+      example: track
+      selector:
+        text:
+    artist:
+      selector:
+        text:
+    album:
+      selector:
+        text:
+    enqueue:
+      example: replace
+      selector:
+        text:
+    radio_mode:
+      selector:
+        boolean:
+    speaker:
+      example: user-41aa035bbe4a4ca0904ef171eb0d1e27
+      selector:
+        text:
+    person:
+      selector:
+        entity:
+          domain: person
+
+search:
+  name: Search as a person
+  description: music_assistant.search in the person's own accounts (returns the results).
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+    media_type:
+      example: track
+      selector:
+        text:
+    artist:
+      selector:
+        text:
+    album:
+      selector:
+        text:
+    limit:
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 50
+    speaker:
+      selector:
+        text:
+    person:
+      selector:
+        entity:
+          domain: person
+
+like:
+  name: Like the current track for a person
+  description: Likes (or unlikes) what the player plays, in exactly one of the person's own accounts.
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          domain: media_player
+          integration: music_assistant
+    liked:
+      default: true
+      selector:
+        boolean:
+    dry_run:
+      default: false
+      selector:
+        boolean:
+    speaker:
+      selector:
+        text:
+    person:
+      selector:
+        entity:
+          domain: person
+
+accounts:
+  name: List music accounts
+  description: The person / guest to account mapping as it is used right now.

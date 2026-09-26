@@ -1,0 +1,10 @@
+{
+  "domain": "music_accounts",
+  "name": "Music accounts per person",
+  "after_dependencies": ["music_assistant"],
+  "codeowners": [],
+  "documentation": "https://github.com/alex-mextner/aisis/issues/17",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}

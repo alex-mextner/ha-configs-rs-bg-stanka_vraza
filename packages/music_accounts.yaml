@@ -1,0 +1,16 @@
+# Music accounts per person and guest (aisis#17): custom_components/music_accounts.
+#
+#   music_accounts.play      music_assistant.play_media with the person's own accounts
+#   music_accounts.search    music_assistant.search in the person's own accounts (response)
+#   music_accounts.like      like/unlike what a player plays, in ONE of the person's accounts
+#   music_accounts.accounts  the person/guest -> account mapping (response)
+#
+# Who: `speaker` = Wakeword Studio voice account id (user-<HA user id> / guest-<slug>) or
+# `person` = person entity. Nobody/unknown/expired guest -> household default for play and
+# search; a like is refused without an own account. Voice commands calling these: aisis#18.
+#
+# Accounts are added on the host: ytm-cookie / yandex-music-token --person NAME | --guest NAME,
+# music-accounts list|assign|sync|expire (scripts/ma_accounts.sh). Mapping (no secrets):
+# /config/oww-dataset/voices/music_accounts.json. Likes use the MA plugin person_likes
+# (docker/music-assistant/person_likes) because MA 2.10 would like in every account.
+music_accounts:

@@ -1,0 +1,14 @@
+{
+  "type": "plugin",
+  "domain": "person_likes",
+  "stage": "experimental",
+  "name": "Per-person likes (local)",
+  "description": "Local plugin from the HA repo (docker/music-assistant/person_likes): likes or unlikes a track in exactly one YouTube Music / Yandex Music account. Used by Home Assistant's music_accounts (aisis#17).",
+  "codeowners": [],
+  "requirements": [],
+  "documentation": "https://github.com/alex-mextner/aisis/issues/17",
+  "multi_instance": false,
+  "builtin": true,
+  "allow_disable": true,
+  "icon": "heart"
+}

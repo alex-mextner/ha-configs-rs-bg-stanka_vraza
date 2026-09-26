@@ -1,0 +1,4 @@
+# /etc/cron.d/music-accounts (installed from the HA repo scripts/host/music-accounts.cron)
+# aisis#17: remove expired guest music accounts and keep the MA provider filters in sync.
+# Skips the run while /home/ultra/.ma-maintenance.lock is held by someone else.
+17 * * * * root MA_LOCK_SKIP=1 /usr/local/bin/music-accounts expire >> /tmp/ha_music_accounts.log 2>&1
