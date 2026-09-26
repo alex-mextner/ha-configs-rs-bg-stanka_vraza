@@ -429,6 +429,22 @@ class Tool:
                             values=want,
                         )
 
+        owned = {i for e in self.people.values() for i in (e.get("providers") or {}).values()}
+        foreign = owned - set(default_own.values())
+        shared = [i for i in confs if i not in owned]
+
+        def filter_for(entry: dict[str, Any] | None) -> list[str]:
+            """A person: own accounts + the default's for services they lack + the rest."""
+            if not foreign:
+                return []  # one account per service: nothing to steer
+            if entry is None:
+                # everybody else (HA integration, UI logins, party guest) = household
+                # default; without a filter MA picks whichever account loaded first
+                return sorted({*shared, *default_own.values()})
+            own = dict(entry.get("providers") or {})
+            fallback = [i for d, i in default_own.items() if d not in own]
+            return sorted({*shared, *own.values(), *fallback})
+
         # 2. MA users for persons with own accounts
         users = {u["username"]: u for u in await self.users()}
         for speaker, entry in self.people.items():
@@ -441,7 +457,10 @@ class Tool:
                     entry["ma_user"] = username
                     changed = True
                 continue
-            print(f"{'would create' if self.dry else 'creating'} MA user {username} for {entry.get('name')}")
+            print(
+                f"{'would create' if self.dry else 'creating'} MA user {username} for "
+                f"{entry.get('name')}, provider filter {filter_for(entry) or 'none (all)'}"
+            )
             changed = True
             if not self.dry:
                 await self.cmd(
@@ -458,9 +477,6 @@ class Tool:
                 users = {u["username"]: u for u in await self.users()}
 
         # 3. provider filters
-        owned = {i for e in self.people.values() for i in (e.get("providers") or {}).values()}
-        foreign = owned - set(default_own.values())
-        shared = [i for i in confs if i not in owned]
         person_users = {
             e["ma_user"]: e for s, e in self.people.items() if e.get("ma_user") and s != default_speaker
         }
@@ -469,16 +485,7 @@ class Tool:
         for username, user in users.items():
             if not user.get("enabled", True):
                 continue
-            if not foreign:
-                want_filter: list[str] = []  # one account per service: nothing to steer
-            elif username in person_users:
-                own = dict(person_users[username].get("providers") or {})
-                fallback = [i for d, i in default_own.items() if d not in own]
-                want_filter = sorted({*shared, *own.values(), *fallback})
-            else:
-                # everybody else (HA integration, UI logins, party guest) = household default;
-                # without a filter MA would pick whichever account of a service loaded first
-                want_filter = sorted({*shared, *default_own.values()})
+            want_filter = filter_for(person_users.get(username))
             current = sorted(user.get("provider_filter") or [])
             if current and current != sorted(managed.get(username) or []):
                 print(f"MA user {username}: filter was set outside music-accounts, left alone")
