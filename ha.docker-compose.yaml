@@ -459,15 +459,43 @@ services:
       - ha-net
 
   avahi-reflector:
-    image: flungo/avahi
+    # mDNS relay LAN <-> ha-net, so HA (bridge network, no LAN leg) discovers Yandex stations,
+    # Cast and ESPHome by name although their IPs are plain DHCP. Only this container has a LAN
+    # leg (macvlan 192.168.0.5): putting HA itself on the LAN broke access to 192.168.0.39:8123
+    # (replies left through the macvlan leg with the wrong source). It serves no ports.
+    # Only the service types in the filter are relayed, so HA's own 172.20.x announcement
+    # never reaches the LAN (homeassistant.local is published by ha-mdns.service on the host).
+    # See docs/network.md.
+    image: flungo/avahi@sha256:20f86981a2e6bcc6b6e898ddc51ec9469d3f9cc71fe25b50d26bdaa23ff47ade
     restart: unless-stopped
+    environment:
+      SERVER_HOST_NAME: ha-mdns-reflector
+      SERVER_USE_IPV6: "no"
+      REFLECTOR_ENABLE_REFLECTOR: "yes"
+      REFLECTOR_REFLECT_FILTERS: "_yandexio._tcp,_googlecast._tcp,_esphomelib._tcp"
     networks:
-      - ha-net
-    cap_add:
-      - NET_ADMIN
+      ha-net: {}
+      lan:
+        ipv4_address: 192.168.0.5
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: "0.5"
 
 networks:
   ha-net:
     driver: bridge
   chatgpt-web:
     driver: bridge
+  lan:
+    # macvlan on the cable NIC for avahi-reflector only. 192.168.0.5 is outside the router's
+    # DHCP pool (.10-.254). The host itself can't talk to macvlan children (by design).
+    driver: macvlan
+    driver_opts:
+      parent: enp3s0
+    ipam:
+      config:
+        - subnet: 192.168.0.0/24
+          gateway: 192.168.0.1
+          ip_range: 192.168.0.5/32

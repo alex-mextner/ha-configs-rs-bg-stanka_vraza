@@ -143,9 +143,11 @@ yandex_station:
   domain: yandex.com
   ssl: false
   # No hardcoded speaker IPs (they are DHCP, the router has few reservations).
-  # Local hosts must come from mDNS, but HA on ha-net does not see LAN mDNS yet:
-  # an mDNS relay is pending (docs/network.md). Until then the stations work
-  # through the Yandex cloud only.
+  # Local hosts come from mDNS: HA sits on ha-net, and the compose service
+  # avahi-reflector relays _yandexio._tcp from the LAN (docs/network.md).
+  # The integration keeps its mDNS browser running, so a new DHCP address is
+  # picked up without a restart. All three stations run in local mode
+  # (verified 2026-09-26).
 
 rutracker_transmission:
   host_login_url: !secret rutracker_browser_login_url
