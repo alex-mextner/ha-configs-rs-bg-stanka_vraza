@@ -191,13 +191,17 @@ class PersonLikesProvider(PluginProvider):
         for prov in targets:
             if item_id := mapped.get(prov.domain):
                 return prov, item_id
-            if not track.artists:
-                continue
-            # MA's own strict matcher (same as library linking): a wrong match would like
-            # a different song in the person's account, so no fuzzy fallback
-            for match in await self.mass.music.tracks.match_provider(track, prov, strict=True):
-                if match.provider_domain == prov.domain:
-                    return prov, match.item_id
+        # not in the person's catalogues yet: find the same song with MA's own matcher
+        # (library linking). strict=False only drops the version/explicit checks; the title
+        # must still match exactly, an artist must match and the album or the duration too,
+        # so a remix or a different song is not liked by mistake
+        for strict in (True, False):
+            for prov in targets if track.artists else []:
+                for match in await self.mass.music.tracks.match_provider(
+                    track, prov, strict=strict
+                ):
+                    if match.provider_domain == prov.domain:
+                        return prov, match.item_id
         names = ", ".join(p.name for p in targets)
         raise MediaNotFoundError(f"{track.name} was not found in {names}")
 
