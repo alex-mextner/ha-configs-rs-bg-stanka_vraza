@@ -1,0 +1,12 @@
+[Unit]
+Description=Home Assistant mDNS Publisher
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/ultra/.local/bin/ha-mdns-publish.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -19,17 +19,11 @@ services:
       retries: 3
       start_period: 120s
     networks:
-      # ha-net: service names (ollama, esphome, code-server, wyoming-*) + default route.
+      # ha-net only. No LAN (macvlan) leg: it broke 192.168.0.39:8123 for LAN clients.
+      # See docs/network.md.
       ha-net:
-        gw_priority: 100
         aliases:
           - homeassistant.local
-      # lan: a real LAN presence (macvlan on the cable NIC) so mDNS/SSDP discovery
-      # (Yandex stations, Cast, Samsung TV, ESPHome...) reaches HA without hardcoded IPs.
-      # 192.168.0.5 is outside the Ubee DHCP pool (.10-.254). Note: the host itself
-      # can't reach .5 (macvlan isolation) - host tools keep using 172.20.0.x / :8123.
-      lan:
-        ipv4_address: 192.168.0.5
 
   esphome:
     image: ghcr.io/esphome/esphome:latest
@@ -101,19 +95,6 @@ services:
       - /home/ultra/homeassistant:/config:ro
     expose:
       - "8090"
-    restart: unless-stopped
-    networks:
-      - ha-net
-
-  duckdns:
-    image: lscr.io/linuxserver/duckdns:latest
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - SUBDOMAINS=stvrz
-      - TOKEN=${DUCKDNS_TOKEN:?set DUCKDNS_TOKEN in .env}
-    volumes:
-      - /home/ultra/ssl:/config
     restart: unless-stopped
     networks:
       - ha-net
@@ -490,12 +471,3 @@ networks:
     driver: bridge
   chatgpt-web:
     driver: bridge
-  lan:
-    driver: macvlan
-    driver_opts:
-      parent: enp3s0
-    ipam:
-      config:
-        - subnet: 192.168.0.0/24
-          gateway: 192.168.0.1
-          ip_range: 192.168.0.5/32
