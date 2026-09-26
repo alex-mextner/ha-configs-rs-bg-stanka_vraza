@@ -1,0 +1,211 @@
+# Alice → Music Assistant players (aisis#24).
+#
+# Lets the Yandex Stations and the Alice app control the MA players through the
+# Yandex Smart Home integration (dext0r, "Yaha Cloud" entry). HA side only: MA
+# config is not touched, and music is never routed INTO the Yandex Stations.
+#
+# Exposure: the entity filter lives in the YSH config entry options
+# (Settings → Devices & services → Yandex Smart Home → Configure → Entities to
+# expose). Every entity in entity_config below must also be ticked there,
+# otherwise Alice does not see it. Names and rooms come from here.
+#
+# Devices in Alice:
+#   Ноутбук                  media_player.noutbuk     MA local-audio player (laptop speakers)
+#   Телевизор                media_player.gostinaia   MA Chromecast player (the TV's Chromecast)
+#   Музыка на ноутбуке       script.alice_music_laptop     household default (Моя волна)
+#   Моя музыка на ноутбуке   script.alice_my_music_laptop  500 random tracks of the MA library (our likes)
+#   Музыка на телевизоре     script.alice_music_tv
+#   Моя музыка на телевизоре script.alice_my_music_tv
+#
+# Capabilities of the two players (YSH 1.1.3; MA players report PAUSE|PLAY,
+# VOLUME_SET, VOLUME_MUTE, NEXT|PREVIOUS_TRACK but no TURN_ON/OFF):
+#   on_off (custom)  state = playing/buffering;
+#                    on  → script.alice_music_resume (resume the queue, or start the default)
+#                    off → media_player.media_stop
+#   toggle pause     → media_player.media_pause / media_player.media_play
+#   toggle mute      → media_player.volume_mute
+#   range volume     0..100, step 5 → media_player.volume_set (value / 100)
+#   range channel    relative only (not a TV) → media_player.media_next_track / media_previous_track
+#
+# Alice keeps names the user edits in the app; only new devices take the names below.
+
+script:
+  alice_music_play:
+    alias: "Alice: play on an MA player"
+    description: >-
+      Replace the queue of a Music Assistant player with one item and play it.
+      Used by the Alice buttons in packages/alice_music.yaml.
+    icon: mdi:playlist-play
+    mode: parallel
+    max: 4
+    fields:
+      player:
+        description: Music Assistant media_player
+        required: true
+        example: media_player.noutbuk
+        selector:
+          entity:
+            domain: media_player
+            integration: music_assistant
+      media_id:
+        description: MA URI or name of the item
+        required: true
+        example: library://playlist/7
+        selector:
+          text:
+      media_type:
+        description: MA media type of the item
+        example: playlist
+        selector:
+          text:
+    # No media_player.shuffle_set here: MA 2.10 rejects it while the queue is in
+    # dynamic mode ("Cannot change shuffle while the queue is in dynamic mode"),
+    # which aborted the script. The queue keeps its own shuffle setting.
+    sequence:
+      - action: music_assistant.play_media
+        target:
+          entity_id: "{{ player }}"
+        data:
+          media_id: "{{ media_id }}"
+          media_type: "{{ media_type | default('playlist') }}"
+          enqueue: replace
+
+  alice_music_resume:
+    alias: "Alice: resume or start music"
+    description: >-
+      «Алиса, включи ноутбук/телевизор». Resumes the player's MA queue if it has a
+      current item; otherwise starts the household default (Моя волна).
+    icon: mdi:play-circle
+    mode: parallel
+    max: 4
+    fields:
+      player:
+        description: Music Assistant media_player
+        required: true
+        example: media_player.noutbuk
+        selector:
+          entity:
+            domain: media_player
+            integration: music_assistant
+    sequence:
+      - if:
+          - condition: template
+            value_template: >-
+              {{ states(player) in ['paused', 'idle']
+                 and state_attr(player, 'media_content_id') not in [none, ''] }}
+        then:
+          - action: media_player.media_play
+            target:
+              entity_id: "{{ player }}"
+        else:
+          - action: script.alice_music_play
+            data:
+              player: "{{ player }}"
+              # Household default: Yandex «Моя волна» (MA library item "My Wave").
+              media_id: library://playlist/7
+
+  alice_music_laptop:
+    alias: Музыка на ноутбуке
+    description: "Alice button: household default (Моя волна) on the laptop speakers."
+    icon: mdi:laptop
+    mode: single
+    sequence:
+      - action: script.alice_music_play
+        data:
+          player: media_player.noutbuk
+          media_id: library://playlist/7
+
+  alice_my_music_laptop:
+    alias: Моя музыка на ноутбуке
+    description: "Alice button: 500 random tracks of the MA library (our likes) on the laptop speakers."
+    icon: mdi:heart
+    mode: single
+    sequence:
+      - action: script.alice_music_play
+        data:
+          player: media_player.noutbuk
+          # MA built-in "500 Random tracks (from library)": the library is our likes.
+          media_id: library://playlist/4
+
+  alice_music_tv:
+    alias: Музыка на телевизоре
+    description: "Alice button: household default (Моя волна) on the TV (Chromecast)."
+    icon: mdi:television
+    mode: single
+    sequence:
+      - action: script.alice_music_play
+        data:
+          player: media_player.gostinaia
+          media_id: library://playlist/7
+
+  alice_my_music_tv:
+    alias: Моя музыка на телевизоре
+    description: "Alice button: 500 random tracks of the MA library (our likes) on the TV (Chromecast)."
+    icon: mdi:heart
+    mode: single
+    sequence:
+      - action: script.alice_music_play
+        data:
+          player: media_player.gostinaia
+          media_id: library://playlist/4
+
+yandex_smart_home:
+  entity_config:
+    media_player.noutbuk:
+      name: Ноутбук
+      room: Гостиная
+      # MA players have no power feature: "on" means music is playing.
+      state_template: >-
+        {%- set s = states('media_player.noutbuk') -%}
+        {{ 'unavailable' if s == 'unavailable' else ('on' if s in ['playing', 'buffering'] else 'off') }}
+      turn_on:
+        # script.turn_on returns at once, so a slow start does not time out in Alice.
+        action: script.turn_on
+        target:
+          entity_id: script.alice_music_resume
+        data:
+          variables:
+            player: media_player.noutbuk
+      turn_off:
+        action: media_player.media_stop
+        target:
+          entity_id: media_player.noutbuk
+      range:
+        min: 0
+        max: 100
+        precision: 5
+
+    media_player.gostinaia:
+      name: Телевизор
+      room: Гостиная
+      state_template: >-
+        {%- set s = states('media_player.gostinaia') -%}
+        {{ 'unavailable' if s == 'unavailable' else ('on' if s in ['playing', 'buffering'] else 'off') }}
+      turn_on:
+        action: script.turn_on
+        target:
+          entity_id: script.alice_music_resume
+        data:
+          variables:
+            player: media_player.gostinaia
+      turn_off:
+        action: media_player.media_stop
+        target:
+          entity_id: media_player.gostinaia
+      range:
+        min: 0
+        max: 100
+        precision: 5
+
+    script.alice_music_laptop:
+      name: Музыка на ноутбуке
+      room: Гостиная
+    script.alice_my_music_laptop:
+      name: Моя музыка на ноутбуке
+      room: Гостиная
+    script.alice_music_tv:
+      name: Музыка на телевизоре
+      room: Гостиная
+    script.alice_my_music_tv:
+      name: Моя музыка на телевизоре
+      room: Гостиная
