@@ -70,6 +70,13 @@ ingress:
         name: text/html
         match: '<head>'
         replace: '<head><script>try{var k="ma_access_token",t=localStorage.getItem(k);if(t){var x=new XMLHttpRequest();x.open("GET","auth/me",false);x.setRequestHeader("Authorization","Bearer "+t);x.send();if(x.status==401)localStorage.removeItem(k)}}catch(e){}</script>'
+      # Only one of the HA and MA sidebars stays expanded, see docs/ma-sidebar-sync.md.
+      # Bump ?v= after editing the script.
+      - mode: body
+        path: ^/(index\.html)?$
+        name: text/html
+        match: '</head>'
+        replace: '<script src="/local/ma-sidebar-sync/ma-sidebar-sync.js?v=1"></script></head>'
       - mode: header
         path: ^/(index\.html)?$
         name: ^etag$

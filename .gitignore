@@ -40,6 +40,9 @@ www/wakeword/*
 !www/network-devices/
 www/network-devices/*
 !www/network-devices/network-devices-card.js
+!www/ma-sidebar-sync/
+www/ma-sidebar-sync/*
+!www/ma-sidebar-sync/ma-sidebar-sync.js
 backups/
 *.log
 *.log.*
