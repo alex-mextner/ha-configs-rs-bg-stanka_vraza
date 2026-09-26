@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import secrets
+import signal
 import time
 from dataclasses import dataclass, field
 
@@ -613,7 +614,15 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("CHATGPT_WEB_PORT", "8787"))).start()
     log.info("listening; state=%s", browser.state)
-    await asyncio.Event().wait()
+    stop = asyncio.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+    await stop.wait()
+    # Close Chrome cleanly so the profile (session cookies) is flushed to disk.
+    await runner.cleanup()
+    await browser.ctx.close()
+    await browser.pw.stop()
+    log.info("stopped")
 
 
 if __name__ == "__main__":
