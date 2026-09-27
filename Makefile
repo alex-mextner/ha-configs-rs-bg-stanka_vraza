@@ -6,7 +6,7 @@ RUFF := $(VENV)/bin/ruff
 PYTEST := $(VENV)/bin/pytest
 PYRIGHT := $(VENV)/bin/pyright
 
-.PHONY: venv devdeps testdeps runtimedeps check lint format fix test all clean typecheck
+.PHONY: venv devdeps testdeps runtimedeps check lint format fix test test-entity-note all clean typecheck
 
 # Create venv and basic packaging tooling only. No linting here.
 venv:
@@ -45,6 +45,14 @@ fix: devdeps
 # Test suite (ensures harness + runtime deps are installed)
 test: testdeps runtimedeps
 	PYTHONPATH=$(CURDIR) $(PYTEST)
+
+# entity_note tests: own venv, pinned to the HA release running here
+ENTITY_NOTE_VENV := hga-entity-note
+
+test-entity-note:
+	test -x $(ENTITY_NOTE_VENV)/bin/python || $(PYTHON_BIN) -m venv $(ENTITY_NOTE_VENV)
+	$(ENTITY_NOTE_VENV)/bin/pip install -q -r requirements/test-entity-note.txt
+	PYTHONPATH=$(CURDIR) $(ENTITY_NOTE_VENV)/bin/pytest tests/custom_components/entity_note
 
 # Static type checking
 typecheck: devdeps runtimedeps

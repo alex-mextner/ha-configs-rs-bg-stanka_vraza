@@ -1,0 +1,10 @@
+# entity_note tests, pinned to the Home Assistant release running here (.HA_VERSION).
+# Separate from test.txt, which home_generative_agent pins to an older release.
+# Bump all of these together when the live HA is updated.
+homeassistant==2026.9.3
+pytest-homeassistant-custom-component==0.13.366
+home-assistant-frontend==20260826.7
+# conversation (for the Assist/LLM exposure test)
+gazetteer-matcher==1.1.0
+hassil==3.12.1
+home-assistant-intents==2026.8.28
