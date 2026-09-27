@@ -1,0 +1,41 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Entity notes are already set up."
+    },
+    "step": {
+      "user": {
+        "description": "Adds a note to the entity dialog: a public note that every user can read, and a private note that only administrators see. Only administrators can write notes. Notes are never shared with voice assistants.",
+        "title": "Entity notes"
+      }
+    }
+  },
+  "issues": {
+    "frontend_hooks_failed": {
+      "description": "The notes UI could not attach to part of the Home Assistant frontend (version {frontend_version}): {hooks}. Your notes are safe, and the Notes panel in the sidebar still shows and edits them. The Entity notes integration needs an update for this frontend version.",
+      "title": "Entity notes: part of the UI is not shown"
+    },
+    "missing_notes": {
+      "fix_flow": {
+        "abort": {
+          "nothing_missing": "No notes are missing any more."
+        },
+        "step": {
+          "discard": {
+            "description": "The {count} missing notes will be forgotten. This cannot be undone.\n\n{entities}",
+            "title": "Forget the missing notes?"
+          },
+          "init": {
+            "description": "{count} notes disappeared without being deleted in the notes UI, for example after a registry restore or a damaged file. A safety copy of them was kept.\n\n{entities}",
+            "menu_options": {
+              "discard": "Forget them",
+              "restore": "Restore them from the safety copy"
+            },
+            "title": "Restore the missing entity notes?"
+          }
+        }
+      },
+      "title": "Entity notes are missing"
+    }
+  }
+}

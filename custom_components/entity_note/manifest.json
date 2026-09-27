@@ -1,0 +1,14 @@
+{
+  "domain": "entity_note",
+  "name": "Entity notes",
+  "codeowners": ["@alex-mextner"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "repairs", "websocket_api"],
+  "documentation": "https://github.com/alex-mextner/ha-configs-rs-bg-stanka_vraza/issues/3",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/alex-mextner/ha-configs-rs-bg-stanka_vraza/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}
