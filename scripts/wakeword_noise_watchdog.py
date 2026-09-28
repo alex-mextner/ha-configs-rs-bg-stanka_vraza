@@ -18,6 +18,7 @@ import argparse
 import array
 import math
 import shutil
+import struct
 import datetime as dt
 import json
 import os
@@ -75,6 +76,26 @@ SILENT_PEAK = 2  # |sample| <= 2 everywhere: digital silence, not a quiet room
 LEVEL_CACHE = ".levels.json"
 
 
+def wav_integrity_problem(path: Path) -> str | None:
+    try:
+        size = path.stat().st_size
+        if size < 44:
+            return f"file too short: {size} bytes"
+        with path.open("rb") as handle:
+            header = handle.read(12)
+        if header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            return "not a RIFF/WAVE file"
+        declared_size = struct.unpack("<I", header[4:8])[0] + 8
+        if declared_size != size:
+            return f"RIFF size mismatch: declared {declared_size}, actual {size}"
+        with wave.open(str(path), "rb") as handle:
+            if handle.getnframes() <= 0:
+                return "WAV contains no audio frames"
+    except (OSError, struct.error, wave.Error, EOFError) as err:
+        return f"{type(err).__name__}: {err}"
+    return None
+
+
 def measure_wav(path: Path) -> dict[str, float] | None:
     try:
         with wave.open(str(path), "rb") as handle:
@@ -102,6 +123,7 @@ def summarize_raw_live(dataset_root: Path, started_at: dt.datetime | None, updat
     latest_mtime: dt.datetime | None = None
     seconds = silent_seconds = 0.0
     counted = silent_files = 0
+    invalid_segments: list[str] = []
     recent: list[dict[str, Any]] = []
     changed = False
     newest_sound: dt.datetime | None = None
@@ -111,9 +133,12 @@ def summarize_raw_live(dataset_root: Path, started_at: dt.datetime | None, updat
         mtime = dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.UTC)
         if latest_mtime is None or mtime > latest_mtime:
             latest_mtime, latest_path = mtime, path
-        if stat.st_size <= 44 or (started_at is not None and mtime < started_at):
+        if started_at is not None and mtime < started_at:
             continue
         key = str(path.relative_to(raw_live))
+        if wav_integrity_problem(path) is not None:
+            invalid_segments.append(key)
+            continue
         entry = cache.get(key)
         # The newest segment is still being written: measure it, but do not cache it yet.
         still_writing = (now_utc() - mtime).total_seconds() < 90
@@ -171,6 +196,8 @@ def summarize_raw_live(dataset_root: Path, started_at: dt.datetime | None, updat
         or (last_skip is not None and (not recent or recent[-1]["peak"] <= SILENT_PEAK)
             and (newest_sound is None or last_skip >= newest_sound)),
         "silence_skipped_files_since_start": skipped_files,
+        "invalid_files_since_start": len(invalid_segments),
+        "invalid_segments": invalid_segments[-5:],
         "latest_file": str(latest_path) if latest_path else None,
         "latest_mtime": latest_mtime.isoformat() if latest_mtime else None,
         "latest_age_seconds": newest_age_seconds,
@@ -389,6 +416,35 @@ def command_check(args: argparse.Namespace) -> int:
             changed = True
 
     recording = status["active"]
+    corrupt_repeat = stale_repeat_allowed(
+        {"stale_notification_sent_at": session.get("corrupt_notification_sent_at")},
+        args.stale_repeat_hours,
+    )
+    if recording and raw_live.get("invalid_files_since_start") and corrupt_repeat:
+        invalid_segments = raw_live.get("invalid_segments") or []
+        message = (
+            "Wakeword recording has a structurally invalid published WAV.\n"
+            f"Invalid files since session start: {raw_live['invalid_files_since_start']}\n"
+            f"Recent invalid files: {', '.join(invalid_segments)}"
+        )
+        if args.dry_run:
+            print(message)
+        else:
+            print(
+                json.dumps(
+                    notify_ha(
+                        ha_url,
+                        "Wakeword recording: corrupt WAV",
+                        message,
+                        "wakeword_noise_corrupt",
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        session["corrupt_notification_sent_at"] = now_utc().isoformat()
+        changed = True
+
     silence_repeat = stale_repeat_allowed(
         {"stale_notification_sent_at": session.get("silence_notification_sent_at")}, args.stale_repeat_hours
     )
