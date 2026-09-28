@@ -88,6 +88,10 @@ class SegmentWriter:
     (phrase) collection session is active, and for a cooldown after it, the
     segment being written is discarded and recording stays paused.
 
+    Only completed segments are published as .wav files. Audio is first written
+    to a .wav.partial file and atomically renamed after its WAV header is synced;
+    stale partials from an abrupt process stop are removed on the next start.
+
     A finished segment that is digital silence throughout (a muted or dead
     microphone; a quiet room never gets there, the XVF AGC keeps its floor near
     -50 dBFS) is deleted and logged to silence_skipped.jsonl, so it takes no disk
@@ -125,6 +129,8 @@ class SegmentWriter:
         self.skipping = False
         self.last_reason: str | None = None
         self.current_path: Path | None = None
+        self.partial_path: Path | None = None
+        self.stale_partials_cleaned = False
         self.positive_session_file = positive_session_file
         self.positive_cooldown_seconds = positive_cooldown_seconds
         self.positive_block_until = 0.0
@@ -134,12 +140,9 @@ class SegmentWriter:
             return
         self.positive_block_until = time.monotonic() + self.positive_cooldown_seconds
         if self.current is not None:
-            path = self.current_path
-            self.current.close()
-            self.current = None
+            path = self.partial_path
+            self._abort_current()
             self.skipping = True
-            if path is not None:
-                path.unlink(missing_ok=True)
             print(f"[wakeword-recorder] positive session active: discarded {path}", file=sys.stderr, flush=True)
 
     def _recording_allowed(self) -> bool:
@@ -159,19 +162,51 @@ class SegmentWriter:
             self.last_reason = reason
         return reason is None
 
+    def _cleanup_stale_partials(self) -> None:
+        if self.stale_partials_cleaned:
+            return
+        self.stale_partials_cleaned = True
+        if not self.output_dir.exists():
+            return
+        stale = list(self.output_dir.rglob("*.wav.partial"))
+        for path in stale:
+            path.unlink(missing_ok=True)
+        if stale:
+            print(
+                f"[wakeword-recorder] removed {len(stale)} stale partial segment(s)",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def _abort_current(self) -> None:
+        current = self.current
+        self.current = None
+        if current is not None:
+            try:
+                current.close()
+            except OSError:
+                pass
+        if self.partial_path is not None:
+            self.partial_path.unlink(missing_ok=True)
+        self.partial_path = None
+        self.current_path = None
+
     def _open_next(self) -> None:
+        self._cleanup_stale_partials()
         now = dt.datetime.now()
         day_dir = self.output_dir / now.strftime("%Y-%m-%d")
         day_dir.mkdir(parents=True, exist_ok=True)
         path = day_dir / f"{now.strftime('%H%M%S_%f')}.wav"
-        self.current = path.open("w+b")
+        partial_path = path.with_suffix(path.suffix + ".partial")
+        self.current = partial_path.open("x+b")
         self.current_path = path
+        self.partial_path = partial_path
         self.segment_peak = 0
         self.segment_started = dt.datetime.now(dt.timezone.utc)
         self.frames_written = 0
         self.frames_since_sync = 0
         self._write_header()
-        print(f"[wakeword-recorder] writing {path}", file=sys.stderr, flush=True)
+        print(f"[wakeword-recorder] writing {partial_path}", file=sys.stderr, flush=True)
 
     def _write_header(self) -> None:
         if self.current is None:
@@ -213,51 +248,68 @@ class SegmentWriter:
     def write(self, data: bytes) -> None:
         if not data:
             return
-        self._watch_positive_session()
-        offset = 0
-        frame_bytes = self.sample_width
-        total_frames = len(data) // frame_bytes
-        while offset < len(data):
-            if self.frames_written >= self.segment_frames or (self.current is None and not self.skipping):
-                self.close()
-                self.frames_written = 0
-                self.skipping = not self._recording_allowed()
-                if not self.skipping:
-                    self._open_next()
+        try:
+            self._watch_positive_session()
+            offset = 0
+            frame_bytes = self.sample_width
+            total_frames = len(data) // frame_bytes
+            while offset < len(data):
+                if self.frames_written >= self.segment_frames or (self.current is None and not self.skipping):
+                    self.close()
+                    self.frames_written = 0
+                    self.skipping = not self._recording_allowed()
+                    if not self.skipping:
+                        self._open_next()
 
-            available_frames = self.segment_frames - self.frames_written
-            take_frames = min(available_frames, total_frames - (offset // frame_bytes))
-            take_bytes = take_frames * frame_bytes
-            if self.current is not None:
-                chunk = data[offset : offset + take_bytes]
-                self.current.write(chunk)
-                self.frames_since_sync += take_frames
-                if self.drop_silent_peak >= 0 and self.segment_peak <= self.drop_silent_peak and chunk:
-                    pcm = array("h")
-                    pcm.frombytes(chunk[: len(chunk) - len(chunk) % 2])
-                    if pcm:
-                        self.segment_peak = max(self.segment_peak, max(pcm), -min(pcm))
-            self.frames_written += take_frames
-            offset += take_bytes
-            if self.current is not None and self.frames_since_sync >= self.sync_frames:
-                self._sync()
+                available_frames = self.segment_frames - self.frames_written
+                take_frames = min(available_frames, total_frames - (offset // frame_bytes))
+                take_bytes = take_frames * frame_bytes
+                if self.current is not None:
+                    chunk = data[offset : offset + take_bytes]
+                    self.current.write(chunk)
+                    self.frames_since_sync += take_frames
+                    if self.drop_silent_peak >= 0 and self.segment_peak <= self.drop_silent_peak and chunk:
+                        pcm = array("h")
+                        pcm.frombytes(chunk[: len(chunk) - len(chunk) % 2])
+                        if pcm:
+                            self.segment_peak = max(self.segment_peak, max(pcm), -min(pcm))
+                self.frames_written += take_frames
+                offset += take_bytes
+                if self.current is not None and self.frames_since_sync >= self.sync_frames:
+                    self._sync()
+        except OSError:
+            self._abort_current()
+            raise
 
     def close(self) -> None:
         if self.current is not None:
-            self._sync()
-            self.current.close()
+            try:
+                self._sync()
+                self.current.close()
+            except OSError:
+                self._abort_current()
+                raise
             self.current = None
-            if self.drop_silent_peak >= 0 and self.segment_peak <= self.drop_silent_peak and self.current_path is not None:
-                self._drop_silent(self.current_path)
+            partial_path = self.partial_path
+            final_path = self.current_path
+            self.partial_path = None
+            self.current_path = None
+            if partial_path is None or final_path is None:
+                return
+            if self.drop_silent_peak >= 0 and self.segment_peak <= self.drop_silent_peak:
+                self._drop_silent(partial_path, final_path.name)
+            else:
+                partial_path.replace(final_path)
+                print(f"[wakeword-recorder] finalized {final_path}", file=sys.stderr, flush=True)
 
-    def _drop_silent(self, path: Path) -> None:
+    def _drop_silent(self, path: Path, file_name: str | None = None) -> None:
         path.unlink(missing_ok=True)
         entry = {
             "start": self.segment_started.isoformat(timespec="seconds") if self.segment_started else None,
             "end": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "seconds": round(self.frames_written / self.sample_rate, 1),
             "peak": self.segment_peak,
-            "file": path.name,
+            "file": file_name or path.name,
         }
         with (self.output_dir / "silence_skipped.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(entry) + "\n")
