@@ -150,4 +150,13 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
         module_url="/chatgpt-native-panel.js",
         require_admin=True,
     )
+    await panel_custom.async_register_panel(
+        hass,
+        webcomponent_name="ubuntu-desktop-panel",
+        frontend_url_path="ubuntu-desktop",
+        sidebar_title="Ubuntu Desktop",
+        sidebar_icon="mdi:monitor",
+        module_url="/chatgpt-native-panel.js",
+        require_admin=True,
+    )
     return True

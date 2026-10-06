@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout><font place="ActiveWindow"><name>sans</name><size>11</size></font></theme>
+  <desktops><number>1</number></desktops>
+  <focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
+  <keyboard>
+    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
+    <keybind key="W-Return"><action name="Execute"><command>desktop-launch terminal</command></action></keybind>
+    <keybind key="W-e"><action name="Execute"><command>desktop-launch files</command></action></keybind>
+    <keybind key="W-space"><action name="ShowMenu"><menu>root-menu</menu></action></keybind>
+  </keyboard>
+  <mouse>
+    <context name="Titlebar">
+      <mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
+      <mousebind button="Left" action="DoubleClick"><action name="ToggleMaximize"/></mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="A-Left" action="Drag"><action name="Move"/></mousebind>
+      <mousebind button="A-Right" action="Drag"><action name="Resize"/></mousebind>
+    </context>
+    <context name="Close"><mousebind button="Left" action="Click"><action name="Close"/></mousebind></context>
+    <context name="Iconify"><mousebind button="Left" action="Click"><action name="Iconify"/></mousebind></context>
+    <context name="Maximize"><mousebind button="Left" action="Click"><action name="ToggleMaximize"/></mousebind></context>
+    <context name="Desktop"><mousebind button="Right" action="Press"><action name="ShowMenu"><menu>root-menu</menu></action></mousebind></context>
+  </mouse>
+  <menu><file>menu.xml</file></menu>
+  <applications><application class="Chatgpt"><maximized>yes</maximized></application></applications>
+</openbox_config>

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=ChatGPT
+Exec=desktop-launch chatgpt
+Icon=/usr/share/icons/HighContrast/48x48/apps/web-browser.png
+Terminal=false
