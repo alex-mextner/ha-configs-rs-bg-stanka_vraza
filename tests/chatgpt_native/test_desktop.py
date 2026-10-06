@@ -2,6 +2,8 @@
 
 import asyncio
 import importlib.util
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -167,3 +169,30 @@ async def test_bridge_rejects_non_ha_peer_even_with_forwarded_header(
     with pytest.raises(web.HTTPForbidden):
         await bridge.private_peer(request, handler)
     handler.assert_not_called()
+
+
+@pytest.mark.parametrize("original", ["", "/home/ultra/.config"])
+def test_launcher_restores_application_config_after_openbox_override(
+    tmp_path, original
+) -> None:
+    """Execute the real launcher with a harmless terminal substitute."""
+    terminal = tmp_path / "xterm"
+    terminal.write_text('#!/bin/sh\nprintf "%s" "${XDG_CONFIG_HOME-<unset>}"\n')
+    terminal.chmod(0o700)
+    launcher = (
+        Path(__file__).parents[2] / "scripts/chatgpt_native/desktop/desktop-launch"
+    )
+    result = subprocess.run(  # noqa: S603 -- repository launcher and fixture-owned binary only
+        ["/bin/bash", str(launcher), "terminal"],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + ":/usr/bin:/bin",
+            "XDG_CONFIG_HOME": "/isolated/openbox/config",
+            "CHATGPT_DESKTOP_APP_CONFIG_HOME": original,
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout != (original or "<unset>"):
+        pytest.fail("Openbox config leaked into the user's application config")

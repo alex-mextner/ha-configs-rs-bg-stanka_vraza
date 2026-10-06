@@ -1,5 +1,11 @@
 #!/bin/bash
 set -euo pipefail
+# Openbox uses a private config directory; applications keep their original one.
+if [ -n "${CHATGPT_DESKTOP_APP_CONFIG_HOME:-}" ]; then
+    export XDG_CONFIG_HOME="$CHATGPT_DESKTOP_APP_CONFIG_HOME"
+else
+    unset XDG_CONFIG_HOME
+fi
 case "${1:-}" in
     terminal) cd /home/ultra; exec xterm -fa monospace -fs 13 -bg '#171d29' -fg '#f1f5f9' ;;
     files) exec nautilus --new-window /home/ultra ;;
