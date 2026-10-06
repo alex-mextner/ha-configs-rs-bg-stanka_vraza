@@ -1,0 +1,17 @@
+[Unit]
+Description=Separate native ChatGPT GUI for HA administrators
+After=graphical-session.target
+ConditionPathIsMountPoint=/run/media/ultra/WD500
+
+[Service]
+ExecStartPre=/usr/bin/test -O /run/media/ultra/WD500/ultra-work
+ExecStart=/home/ultra/.local/share/chatgpt-native-ha/gui-session/start.sh
+Restart=on-failure
+RestartSec=15
+MemoryMax=2G
+MemorySwapMax=512M
+CPUQuota=150%
+UMask=0077
+
+[Install]
+WantedBy=default.target
