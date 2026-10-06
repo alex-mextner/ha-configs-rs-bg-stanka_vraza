@@ -28,3 +28,37 @@ The implementation source is installed in the active HA checkout. This branch co
 - Service: `systemctl --user status chatgpt-native-ha`.
 - Stop only the new GUI: `systemctl --user stop chatgpt-native-ha`.
 - Rollback HA: remove only `packages/chatgpt_native.yaml` and the new `custom_components/chatgpt_native/` directory, then use `scripts/ha_safe_reload.sh`. Keep the WD500 directory/profile unless explicitly requested otherwise.
+
+## Proposed shared Ubuntu Desktop (draft, not deployed)
+
+The desktop extension adds an administrator-only sidebar entry at `/ubuntu-desktop` and retains `/chatgpt-native`. Both use the exact same `/api/chatgpt_native` session/assets/WebSocket proxy and the same :109 framebuffer. The Desktop panel explicitly says that window switching is visible in both panels. ChatGPT is retained as an application/window, rather than replaced. This is a virtual application desktop for ultra, not a mirror of the physical GNOME/Wayland screen.
+
+Openbox manages and moves/maximizes windows. A 48-pixel tint2 taskbar provides Terminal, Files and ChatGPT launchers and a window switcher. Terminal runs xterm in `/home/ultra`; Files uses existing Nautilus. ChatGPT's launcher focuses the existing `Chatgpt` window with wmctrl, without opening another app/profile. Additional installed applications can be launched from the terminal. Alt+Tab changes windows; Super+Return opens Terminal, Super+E opens Files, Super+Space opens the desktop menu. The noVNC controls provide keyboard/modifier input on mobile.
+
+`desktop-session.sh` runs inside a private `dbus-run-session`, so activating Files stays on the virtual screen rather than the physical GNOME application's bus. The original user runtime/keyring and application configuration are retained; only Openbox gets a separate XDG config directory. `desktop-launch` restores the original application XDG config for programs launched through Openbox's menu/shortcuts. No second keyring, login, credentials, SSH or ACL rules are created.
+
+Desktop packages come from the host's configured Ubuntu repositories and are extracted into `~/.local/share/chatgpt-native-ha/desktop-runtime/root`, alongside the existing gui-runtime. Additional packages used here: openbox, tint2, xterm, wmctrl, libobrender32, libobt2, libimlib2t64, libutempter0, xbitmaps. All libraries already present on this Ubuntu host are reused. Imlib2's loader directory and XDG data directory point at the extracted root so tint2 can load icons. No third-party binaries are committed to this repository. No new system package installation, service, network listener or external port is introduced.
+
+### Review and deployment boundary
+
+Only isolated :119 testing has been performed for this desktop extension. It is not deployed to HA or :109 and has not been tested through the new live HA panel or an actual phone. Existing authentication code/network bindings are unchanged. Local backend and panel tests supplement the original live ChatGPT/Ingress proof; they do not prove the complete new phone flow.
+
+After explicit acceptance of the draft PR and private screenshot/report evidence:
+
+1. Back up the installed `gui-session/start.sh` and existing `custom_components/chatgpt_native` sources to a new dated backup. Preserve the WD500 profile, runtime Xauthority and bridge. Do not remove the existing package/integration or ChatGPT panel.
+2. Download the additional official packages with `apt-get download` into a separate `desktop-runtime/debs` folder and extract each with `dpkg-deb -x` into `desktop-runtime/root`. This does not require sudo or system installation. Confirm `ldd` has no missing dependencies; do not work around a permission failure.
+3. Copy `desktop-session.sh` and the `desktop/` configuration subtree into `gui-session/`. The configuration contains the launcher executable, three desktop entries, Openbox rc/menu and tint2 configuration. Keep the existing bridge and VNC listeners unchanged.
+4. **Do not restart `chatgpt-native-ha` to activate controls.** Use the existing :109/Xauthority and start only the controls in a separate foreground terminal:
+
+   ```bash
+   base=/home/ultra/.local/share/chatgpt-native-ha
+   DISPLAY=:109 XAUTHORITY="$base/gui-session/Xauthority" \
+     /usr/bin/dbus-run-session -- "$base/gui-session/desktop-session.sh" --controls-only
+   ```
+
+   This command has an explicit lifetime: keep that terminal/process running until controls are intentionally stopped or the native GUI next restarts. It does not launch, terminate or restart ChatGPT. The PID and ChatGPT window must remain unchanged. No new supervisor/service is installed. For unattended persistence after acceptance, copy the reviewed `start.sh` for the next natural service start; it launches desktop controls and ChatGPT together. Do not run both control owners on the same screen.
+5. Deploy only the reviewed HA integration changes, validate the configuration and use the repository's safe reload procedure. This HA reload is separate from the native ChatGPT user service. Reload the browser to register the second web component, then test admin access, anonymous denial, role revocation and the new panel on the phone. Stop if a new credential prompt appears; never enter or change a password to bypass it.
+
+### Desktop-only rollback
+
+Stop the controls-only command (Ctrl+C in its owning terminal) to remove Openbox/tint2/private application bus, leaving ChatGPT and VNC in place. Restore the backed-up start script and HA integration files from before this desktop change, and safely reload HA to remove only `/ubuntu-desktop`. Preserve `/chatgpt-native`, its profile, Xauthority, bridge and service. For controls launched on a future service start, rollback requires scheduling the native GUI restart with the user; it is not silently performed during the current session.
