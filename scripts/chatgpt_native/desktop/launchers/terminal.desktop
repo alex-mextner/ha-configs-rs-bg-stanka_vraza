@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Exec=desktop-launch terminal
+Icon=/usr/share/icons/HighContrast/48x48/apps/utilities-terminal.png
+Terminal=false

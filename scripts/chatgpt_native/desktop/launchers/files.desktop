@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Files
+Exec=desktop-launch files
+Icon=/usr/share/icons/HighContrast/48x48/apps/system-file-manager.png
+Terminal=false

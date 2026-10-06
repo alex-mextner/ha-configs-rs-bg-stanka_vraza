@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+case "${1:-}" in
+    terminal) cd /home/ultra; exec xterm -fa monospace -fs 13 -bg '#171d29' -fg '#f1f5f9' ;;
+    files) exec nautilus --new-window /home/ultra ;;
+    chatgpt)
+        # Focus the existing window; do not open another profile or application.
+        exec wmctrl -x -a Chatgpt ;;
+    *) echo 'Usage: desktop-launch terminal|files|chatgpt' >&2; exit 2 ;;
+esac
