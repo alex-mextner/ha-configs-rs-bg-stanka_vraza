@@ -15,7 +15,7 @@ class NativeChatGPTPanel extends HTMLElement {
     try {
       await this.authorize();
       this.innerHTML = '<iframe title="Native ChatGPT" style="border:0;width:100%;height:100%;position:absolute;inset:0" allow="clipboard-read; clipboard-write"></iframe>';
-      this.querySelector('iframe').src = '/api/chatgpt_native/vnc.html?autoconnect=true&resize=scale&path=api/chatgpt_native/websockify';
+      this.querySelector('iframe').src = '/api/chatgpt_native/vnc.html?autoconnect=true&resize=scale&path=/api/chatgpt_native/websockify';
       this._timer = setInterval(() => this.authorize().catch(() => {
         clearInterval(this._timer);
         this.innerHTML = '<p>Сессия HA истекла. Войдите снова.</p>';

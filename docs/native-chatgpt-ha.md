@@ -12,7 +12,11 @@ Validation: configuration check and `ha_safe_reload.sh`; HA healthy; ruff format
 
 ## Material limits
 
-The installed package is branded ChatGPT, but its captured default screen says Codex. This proves the installed native binary works, not that the ChatGPT conversation view was visually verified. Browser automation is unavailable in the delegated execution environment (`Browser is not available: iab`), so rendering of the HA sidebar iframe and interactive keyboard/mouse were not browser-tested. Actual non-admin HA credentials were not created or used; those role cases were tested with current-user mocks.
+The official launcher is `/usr/bin/chatgpt` (`Exec=chatgpt %U` in the installed ChatGPT desktop entry). This app has a native product dropdown with ChatGPT and Codex. The separate GUI was switched via that dropdown to ChatGPT, and its Chat tab and Ask ChatGPT composer were visually verified inside the real HA iframe. Existing HA credentials were reused only temporarily for the local browser smoke; no account/login/password was created, and temporary browser token state was cleared and the browser closed afterward.
+
+Browser smoke caught and fixed a relative WebSocket path bug. The panel now uses the absolute `/api/chatgpt_native/websockify` path. The final visual check required actual 1280x900 framebuffer pixels, not merely HTTP or a canvas element. Real non-admin HA credentials were not created or used; non-admin/inactive/deleted/revoked-role cases were tested with current-user mocks, and anonymous HTTP/WebSocket denials and real existing-admin access were tested live.
+
+The dedicated browser profile/cache is `/run/media/ultra/WD500/ultra-work/chatgpt-native`; runtime/Xauthority/service logs are under `~/.local/share/chatgpt-native-ha`. Existing account and agent data remain in the user's existing `~/.codex` / `~/.config/Codex`; this is a separate GUI/profile, not a separate account or migration of all user data to WD500.
 
 The bridge pins the current HA container IP. If Docker assigns another IP, it fails closed until that allowlist is updated. At boot the service starts only if WD500 is already mounted at its expected path. If the mount arrives later, run `systemctl --user start chatgpt-native-ha`. Do not redirect the profile onto the root disk.
 
