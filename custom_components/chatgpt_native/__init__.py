@@ -9,8 +9,11 @@ from homeassistant.auth.models import User
 from homeassistant.components import panel_custom
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
+
+CONFIG_SCHEMA = cv.empty_config_schema("chatgpt_native")
 
 BASE = "/api/chatgpt_native"
 BACKEND = "http://172.20.0.1:6081"
