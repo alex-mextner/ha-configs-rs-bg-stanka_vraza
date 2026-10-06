@@ -1,0 +1,13 @@
+{
+  "domain": "chatgpt_native",
+  "name": "Native ChatGPT admin session",
+  "codeowners": [],
+  "dependencies": [
+    "http",
+    "ingress"
+  ],
+  "documentation": "https://github.com/alex-mextner/ha-configs-rs-bg-stanka_vraza/blob/codex/native-chatgpt-ha/docs/native-chatgpt-ha.md",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/alex-mextner/ha-configs-rs-bg-stanka_vraza/issues",
+  "version": "1.0.0"
+}
