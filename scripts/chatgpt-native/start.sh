@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-base=/home/ultra/.local/share/chatgpt-native-ha
+base=${CHATGPT_NATIVE_BASE:-/home/ultra/.local/share/chatgpt-native-ha}
 export LD_LIBRARY_PATH="$base/gui-runtime/root/usr/lib/x86_64-linux-gnu"
 unset WAYLAND_DISPLAY
 export XDG_SESSION_TYPE=x11
@@ -16,4 +16,4 @@ export XAUTHORITY="$base/gui-session/Xauthority"
 vpid=$!
 /usr/bin/python3 "$base/gui-session/bridge.py" >"$base/gui-session/bridge.log" 2>&1 &
 bpid=$!
-/usr/bin/chatgpt --user-data-dir=/run/media/ultra/WD500/ultra-work/chatgpt-native --disable-gpu >"$base/gui-session/chatgpt.log" 2>&1
+/usr/bin/dbus-run-session -- "$base/gui-session/desktop-session.sh" >"$base/gui-session/chatgpt.log" 2>&1
