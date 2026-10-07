@@ -1,0 +1,5 @@
+[Unit]
+Description=Close runaway agent-browser Chrome sessions before host memory exhaustion
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -lc '/home/ultra/homeassistant/scripts/agent_browser_memory_guard.py; rc=$?; if [ "$rc" = 42 ]; then echo "agent-browser memory guard tripped"; PATH=/home/linuxbrew/.linuxbrew/bin:$PATH agent-browser close --all || true; systemctl --user restart agent-browser.service; exit 0; fi; exit "$rc"'

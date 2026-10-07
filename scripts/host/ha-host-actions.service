@@ -1,0 +1,15 @@
+[Unit]
+Description=Home Assistant host action bridge
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=HA_HOST_ACTIONS_BIND=172.20.0.1
+Environment=HA_HOST_ACTIONS_PORT=8787
+ExecStart=/home/ultra/.local/bin/ha-host-actions.py
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

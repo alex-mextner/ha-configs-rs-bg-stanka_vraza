@@ -1,0 +1,15 @@
+[Unit]
+Description=Home Assistant Docker Compose
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/ultra/homeassistant
+ExecStart=/usr/bin/docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml up -d
+ExecStop=/usr/bin/docker compose -f /home/ultra/homeassistant/ha.docker-compose.yaml down
+User=ultra
+
+[Install]
+WantedBy=multi-user.target
